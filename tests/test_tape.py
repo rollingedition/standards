@@ -96,3 +96,31 @@ def test_a_new_edition_changes_only_the_fingerprint_ticks_and_number():
     title_tape = [line for line in a if 'fill="#fbf5e6"/>' in line and line.startswith("<polygon")]
     assert title_tape and all(line in b for line in title_tape)   # the title strip is unchanged
     assert sum('<rect x=' in line and 'height="12"' in line for line in b) == 2
+
+
+def test_an_outlined_cover_is_the_same_cover_with_its_text_as_outlines():
+    args = ("Building Reliable Data Pipelines with Apache Airflow", "2028.02.1", "DKF3-R7TH", 30)
+    live, outlined = cover.render_cover(*args), cover.render_cover(*args, outlined=True)
+    assert "<text" in live and "<text" not in outlined and "<tspan" not in outlined
+    shapes = lambda svg: [line for line in svg.splitlines() if line.startswith(("<svg", "<title", "<rect", "<polygon", "<circle"))]
+    assert shapes(outlined) == shapes(live)              # the frame, alt text, tape, ticks and icon are untouched
+    assert outlined.count('<g fill="#e58f2a">') == 1     # the code under the fingerprint, in cover-tail
+
+
+def test_glyph_runs_kern_and_ligate_as_live_text_does():
+    t = cover.glyphs()["title"]
+    run, advance = cover.glyph_run("AV", "title")
+    assert run[1][0] == t["glyphs"]["A"][0] + t["kerning"]["AV"] < t["glyphs"]["A"][0]    # V tucks under A
+    assert advance == run[1][0] + t["glyphs"]["V"][0]
+    assert [ci for _, ci, _ in cover.glyph_run("fit", "title")[0]] == [0, 2]             # one glyph for "fi", then t
+    mono, width = cover.glyph_run("1QS9-YKDZ", "mono")
+    assert len(mono) == 9 and width == 9 * cover.glyphs()["mono"]["glyphs"]["0"][0]       # monospaced
+    with pytest.raises(ValueError, match="no outline"):
+        cover.glyph_run("検索", "title")
+
+
+def test_a_title_must_be_drawable_on_its_cover():
+    assert cover.title_problem("A Primer on Search Relevance") is None
+    assert cover.title_problem("Café “Search” — Ångström Edition") is None
+    assert "no outline for '検'" in cover.title_problem("Search 検")
+    assert "three lines" in cover.title_problem(" ".join(["Relevance"] * 12))

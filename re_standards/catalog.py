@@ -11,7 +11,7 @@ import tomllib
 from collections import Counter
 from pathlib import Path
 
-from . import data_path
+from . import cover, data_path
 
 SLUG = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 QID = re.compile(r"^Q[1-9][0-9]*$")
@@ -87,6 +87,8 @@ def validate_book(book: dict, tax: dict, released: bool = False) -> list[str]:
         errs.append(f"{who}: slug must be lowercase words joined by hyphens")
     if not book.get("title"):
         errs.append(f"{who}: missing title")
+    elif problem := cover.title_problem(book["title"]):
+        errs.append(f"{who}: {problem}")
     if book.get("status") not in STATUSES:
         errs.append(f"{who}: status must be one of {', '.join(STATUSES)}")
     if book.get("level") not in LEVELS and not (released and "level" not in book):

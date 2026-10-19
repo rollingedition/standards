@@ -9,6 +9,7 @@ How a Rolling Edition book gets verified, in the open. This is the public, read-
 | `data/taxonomy.json` | Areas and skills, the catalog's source of truth, anchored to Wikipedia and Wikidata |
 | `data/review-tiers.toml` | The three review tiers, the file classes triage reads, and the rules that flag a serious risk |
 | `re_standards/tape.py`, `cover.py` | The reference encoder: title tape, edition code, fingerprint, history tape and cover SVG. Anyone can decode a tape or recompute a code with it |
+| `data/cover-glyphs.json` | The letter outlines a cover file draws its text with, since an image can't load a web font. Generated from the fonts the site uses |
 | `re_standards/catalog.py` | Validates the taxonomy and `book.toml`, and builds the catalog |
 | `re_standards/bookfmt.py`, `sections.py` | The book format: chapters, sections, examples and their frozen IDs, and `sections.json` |
 | `re_standards/examples.py`, `harness.py`, `runtime/Dockerfile` | Runs every example in its pinned runtime and compares its output |
@@ -34,4 +35,4 @@ python -m re_standards.tape code SLUG EDITION COMMIT_SHA
 
 Code: [MIT](LICENSE). The writing standards in `writing/` and the agents' prompts in `prompts/`: [CC BY 4.0](LICENSE-TEXT). `re-check licences` writes both files.
 
-`data/mark-outlines.json` holds letter outlines from the Literata typeface, under the [SIL Open Font License 1.1](templates/licenses/OFL-Literata.txt). The other texts in `templates/licenses/`, and the Contributor Covenant in `templates/community/`, belong to their publishers: `templates/fetch.py` copies them verbatim.
+`data/mark-outlines.json` and `data/cover-glyphs.json` hold letter outlines from two typefaces, each under the SIL Open Font License 1.1: Literata ([licence](templates/licenses/OFL-Literata.txt)), and IBM Plex Mono ([licence](templates/licenses/OFL-IBM-Plex-Mono.txt)), whose reserved name the outlines don't take. The other texts in `templates/licenses/`, and the Contributor Covenant in `templates/community/`, belong to their publishers: `templates/fetch.py` copies them verbatim.

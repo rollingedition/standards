@@ -76,6 +76,7 @@ def test_bad_manifests_are_rejected(tax, books):
     errs = c.validate_book(bad, tax)
     assert any("unknown skill" in e for e in errs) and any("status" in e for e in errs)
     assert any("1 to 5" in e for e in c.validate_book(dict(books[0], skills=[]), tax))
+    assert any("no outline" in e for e in c.validate_book(dict(books[0], title="Search 検"), tax))   # the cover couldn't draw it
     assert any("listed twice" in e for e in c.validate_book(dict(books[0], skills=["search-relevance"] * 2), tax))
     with pytest.raises(c.CatalogError):
         c.build_catalog(tax, [bad])

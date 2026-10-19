@@ -14,8 +14,10 @@ SOURCES = {
     "licenses/MIT.txt": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/MIT.txt",
     "community/contributor-covenant-2.1.md":
         "https://raw.githubusercontent.com/EthicalSource/contributor_covenant/release/content/version/2/1/code_of_conduct.md",
-    # data/mark-outlines.json holds Literata's letter outlines, so the font's copyright and licence travel with them
+    # data/mark-outlines.json and data/cover-glyphs.json hold the fonts' letter outlines, so each font's copyright and
+    # licence travel with them
     "licenses/OFL-Literata.txt": "https://raw.githubusercontent.com/google/fonts/main/ofl/literata/OFL.txt",
+    "licenses/OFL-IBM-Plex-Mono.txt": "https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexmono/OFL.txt",
 }
 
 for name, url in SOURCES.items():

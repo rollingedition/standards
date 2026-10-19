@@ -1,0 +1,10 @@
+slug = "search-relevance-engineering-in-practice"
+title = "Search Relevance Engineering in Practice"
+summary = "Ranking, evaluation, merchandising rules and latency budgets."
+status = "draft"
+level = "in-practice"                # foundations | in-practice
+skills = ["search-relevance", "learning-to-rank", "search-evaluation"]
+line = "main"
+core_libraries = []
+expert_reviewer = ""
+sponsor = ""

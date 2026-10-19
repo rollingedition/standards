@@ -1,0 +1,10 @@
+# The organization's community files, generated into its public .github repository (re-check community).
+
+# Where reports go (Proposed: one address for everything, the same as the site's Contact link; a platform test keeps
+# them in step). conduct_contact is where conduct reports go; until it's set, the code of conduct can't be generated.
+# security_contact is where a security report goes when a repository's Security tab doesn't offer private reporting.
+conduct_contact = "hello@rollingedition.com"
+security_contact = "hello@rollingedition.com"
+site = "https://rollingedition.com"
+standards = "https://github.com/rollingedition/standards"
+contributing = "https://github.com/rollingedition/.github/blob/main/CONTRIBUTING.md"   # linked from the organization's page

@@ -1,0 +1,65 @@
+# Review tiers and serious-risk flags. Triage sorts each green pull request into exactly
+# one tier, and flags it when a rule below matches. Until the triage agent calls Claude, the platform's rule-based
+# triage applies the file classes and rules below.
+#
+# Open verification: in every tier, the agent approves a pull request once its checks pass, and it merges
+# itself. Only a flagged pull request waits, for a Rolling Edition maintainer.
+
+# Which files a change touches decides what kind of change it can be. A file in none of these classes is
+# "unknown": triage treats it as the book's settings, and [flags.unknown-files] flags it.
+[files]
+deps = ["examples/requirements.txt", "examples/requirements.in", "examples/.python-version"]
+prose = ["chapters/*.md"]
+code = ["examples/*.py", "examples/*.out", "examples/data/*", "recordings/*", "prep/*"]
+meta = ["book.toml", "redirects.yml", "CODEOWNERS", "renovate.json", "README.md", "CITATION.cff", "LICENSE",
+        "LICENSE-CODE", ".gitignore", ".github/workflows/*"]
+
+[tiers.auto]
+label = "tier:auto"
+qualifies = "Typo or formatting: no change to meaning, code or versions"
+approver = "agent"             # once checks pass, unless flagged
+
+[tiers.quick]
+label = "tier:quick"
+qualifies = "Version bump: all checks green, no prose changed"
+approver = "agent"             # once checks pass, unless flagged
+
+[tiers.expert]
+label = "tier:expert"
+qualifies = "Changes meaning: anything that changes what the book says or what an example does"
+approver = "agent"             # once checks pass, unless flagged; the community corrects anything wrong afterwards
+
+# Serious risks: security, inappropriate content, copyright or legal problems, and scope or brand. A pull
+# request that matches any rule below gets the label and waits for a Rolling Edition maintainer, whose approval is
+# recorded privately; the bot then sets the review/maintainer status. Everything else merges once its checks pass.
+#
+# - The rules stand in for the agents' risk assessment. An assessment will only ever add the flag, never remove it,
+#   and a maintainer can add it by hand.
+# - Triage adds the label and never removes it.
+# - The rules compare a pull request with the book on main, so they start after the first edition: a first edition
+#   is the book as agents drafted and critiqued it, and needs no person's approval.
+# - They're narrow on purpose, so routine work never waits: typo fixes, version bumps of pinned packages, rewritten
+#   prose and changed examples all merge without a person.
+# - Each rule says what it flags twice: `what` for contributors, in the repository's terms, and `reader` for the
+#   site's "How we make books", in a reader's.
+[flags]
+label = "flag:serious"
+
+[flags.workflows]
+what = "Changes the repository's automation: a file under .github/, such as a workflow"
+reader = "Changes the automation that checks and publishes the book"
+paths = [".github/*"]
+
+[flags.new-package]
+what = "Adds a package the book didn't pin before, or a requirement that isn't a plain name==version pin, such as an index URL, a direct link or an editable install. A version bump of a pinned package isn't flagged"
+reader = "Adds a new package to the examples, or installs one from anywhere but the package index. A new version of a package the book already uses isn't flagged"
+files = ["examples/requirements.txt", "recordings/requirements.txt"]
+
+[flags.unknown-files]
+what = "Adds, changes or removes a file that isn't one of the kinds a book holds: chapters, examples and their data, pins, recordings and the book's own settings"
+reader = "Adds, changes or removes a file that isn't part of a book: its chapters, its examples and their data, the library versions they use, its recorded model outputs and its settings"
+
+[flags.book-identity]
+what = "Changes the book's slug, title, authors, sponsor or status in book.toml: what it's called, who it credits, who funds it and whether it's listed"
+reader = "Changes the book's name, web address, credits, sponsor or whether it's listed"
+fields = ["slug", "title", "authors", "sponsor", "status"]

@@ -1,0 +1,29 @@
+name: Report an error
+description: Something in a book is wrong, out of date or unclear.
+labels: ["reader-report"]
+body:
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      description: The section's ID or its link. The ID is the last part of the link beside each heading, such as rank-with-bm25.
+      placeholder: "rank-with-bm25"
+    validations:
+      required: true
+  - type: input
+    id: edition
+    attributes:
+      label: Edition
+      description: The edition you read, from the stamp at the top of the book.
+  - type: textarea
+    id: what
+    attributes:
+      label: What's wrong
+      description: Quote the sentence or the example, and say what's wrong with it.
+    validations:
+      required: true
+  - type: textarea
+    id: source
+    attributes:
+      label: Source
+      description: A link that shows what's right, if you have one, such as the library's documentation or changelog.

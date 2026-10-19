@@ -1,0 +1,17 @@
+name: Ask a question
+description: Something in a book isn't clear to you.
+labels: ["question"]
+body:
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      description: The section's ID or its link.
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations:
+      required: true

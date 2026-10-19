@@ -1,0 +1,453 @@
+{
+ "_about": "Rolling Edition subject taxonomy: areas (top level) and skills (what books are cataloged under). This file is the source of truth. IDs are permanent; labels can change. Wikipedia titles anchor each term; fill Wikidata IDs with `re-check wikidata --write`.",
+ "version": 1,
+ "areas": [
+  {
+   "id": "artificial-intelligence",
+   "label": "Artificial intelligence",
+   "wikipedia": "Artificial_intelligence",
+   "wikidata": "Q11660",
+   "status": "active",
+   "description": "Building applications on language models and other AI systems: prompting, retrieval, agents, evaluation."
+  },
+  {
+   "id": "machine-learning",
+   "label": "Machine learning",
+   "wikipedia": "Machine_learning",
+   "wikidata": "Q2539",
+   "status": "active",
+   "description": "Training, evaluating and improving models from data."
+  },
+  {
+   "id": "search-and-recommendation",
+   "label": "Search and recommendation",
+   "wikipedia": "Information_retrieval",
+   "wikidata": "Q816826",
+   "status": "active",
+   "description": "Finding and ranking the right items for a query or a person: search engines, recommenders, ranking."
+  },
+  {
+   "id": "data-engineering",
+   "label": "Data engineering",
+   "wikipedia": "Data_engineering",
+   "wikidata": "Q104659521",
+   "status": "active",
+   "description": "Moving, storing and preparing data reliably: pipelines, warehouses, streams, quality."
+  },
+  {
+   "id": "data-science",
+   "label": "Data science",
+   "wikipedia": "Data_science",
+   "wikidata": "Q2374463",
+   "status": "active",
+   "description": "Learning from data to make decisions: statistics, experiments, causal inference, visualization."
+  },
+  {
+   "id": "mlops",
+   "label": "MLOps",
+   "wikipedia": "MLOps",
+   "wikidata": "Q60753505",
+   "status": "active",
+   "description": "Running models in production: deployment, monitoring, evaluation over time."
+  },
+  {
+   "id": "software-engineering",
+   "label": "Software engineering",
+   "wikipedia": "Software_engineering",
+   "wikidata": "Q80993",
+   "status": "planned",
+   "description": "Reserved for later books."
+  },
+  {
+   "id": "cloud-computing",
+   "label": "Cloud computing",
+   "wikipedia": "Cloud_computing",
+   "wikidata": "Q483639",
+   "status": "planned",
+   "description": "Reserved for later books."
+  },
+  {
+   "id": "security",
+   "label": "Security",
+   "wikipedia": "Computer_security",
+   "wikidata": "Q3510521",
+   "status": "planned",
+   "description": "Reserved for later books."
+  }
+ ],
+ "skills": [
+  {
+   "id": "large-language-models",
+   "label": "Large language models",
+   "areas": [
+    "artificial-intelligence",
+    "machine-learning"
+   ],
+   "wikipedia": "Large_language_model",
+   "wikidata": "Q115305900",
+   "related": [
+    "prompt-engineering",
+    "retrieval-augmented-generation",
+    "llm-evaluation",
+    "natural-language-processing"
+   ],
+   "description": "How language models work and how to build with them."
+  },
+  {
+   "id": "prompt-engineering",
+   "label": "Prompt engineering",
+   "areas": [
+    "artificial-intelligence"
+   ],
+   "wikipedia": "Prompt_engineering",
+   "wikidata": "Q108941486",
+   "related": [
+    "large-language-models",
+    "llm-evaluation",
+    "ai-agents"
+   ],
+   "description": "Designing and testing the instructions a model receives."
+  },
+  {
+   "id": "retrieval-augmented-generation",
+   "label": "Retrieval-augmented generation",
+   "areas": [
+    "artificial-intelligence",
+    "search-and-recommendation"
+   ],
+   "wikipedia": "Retrieval-augmented_generation",
+   "wikidata": "Q121362277",
+   "related": [
+    "large-language-models",
+    "semantic-search",
+    "vector-databases",
+    "llm-evaluation"
+   ],
+   "description": "Grounding a model's answers in retrieved documents."
+  },
+  {
+   "id": "ai-agents",
+   "label": "AI agents",
+   "areas": [
+    "artificial-intelligence"
+   ],
+   "wikipedia": "Intelligent_agent",
+   "wikidata": "Q1142726",
+   "related": [
+    "prompt-engineering",
+    "llm-evaluation"
+   ],
+   "description": "Systems where a model plans and uses tools to reach a goal."
+  },
+  {
+   "id": "llm-evaluation",
+   "label": "LLM evaluation",
+   "areas": [
+    "artificial-intelligence",
+    "mlops"
+   ],
+   "wikipedia": null,
+   "wikidata": null,
+   "related": [
+    "large-language-models",
+    "prompt-engineering",
+    "retrieval-augmented-generation",
+    "ai-agents",
+    "model-evaluation",
+    "experimentation",
+    "model-monitoring"
+   ],
+   "description": "Test sets, graders, regression suites and monitoring for LLM applications."
+  },
+  {
+   "id": "natural-language-processing",
+   "label": "Natural language processing",
+   "areas": [
+    "artificial-intelligence",
+    "machine-learning"
+   ],
+   "wikipedia": "Natural_language_processing",
+   "wikidata": "Q30642",
+   "related": [
+    "large-language-models",
+    "semantic-search",
+    "deep-learning"
+   ],
+   "description": "Working with text: representation, classification, extraction."
+  },
+  {
+   "id": "deep-learning",
+   "label": "Deep learning",
+   "areas": [
+    "machine-learning",
+    "artificial-intelligence"
+   ],
+   "wikipedia": "Deep_learning",
+   "wikidata": "Q197536",
+   "related": [
+    "natural-language-processing",
+    "model-evaluation"
+   ],
+   "description": "Neural networks and how to train them."
+  },
+  {
+   "id": "feature-engineering",
+   "label": "Feature engineering",
+   "areas": [
+    "machine-learning",
+    "data-science"
+   ],
+   "wikipedia": "Feature_engineering",
+   "wikidata": "Q22245680",
+   "related": [
+    "model-evaluation",
+    "data-pipelines"
+   ],
+   "description": "Turning raw data into inputs a model can learn from."
+  },
+  {
+   "id": "model-evaluation",
+   "label": "Model evaluation",
+   "areas": [
+    "machine-learning",
+    "mlops"
+   ],
+   "wikipedia": null,
+   "wikidata": null,
+   "related": [
+    "llm-evaluation",
+    "search-evaluation",
+    "experimentation",
+    "deep-learning",
+    "feature-engineering",
+    "model-monitoring"
+   ],
+   "description": "Measuring whether a model is good enough, offline and online."
+  },
+  {
+   "id": "model-monitoring",
+   "label": "Model monitoring",
+   "areas": [
+    "mlops"
+   ],
+   "wikipedia": null,
+   "wikidata": null,
+   "related": [
+    "model-evaluation",
+    "data-quality",
+    "llm-evaluation"
+   ],
+   "description": "Watching models in production for drift, errors and regressions."
+  },
+  {
+   "id": "learning-to-rank",
+   "label": "Learning to rank",
+   "areas": [
+    "search-and-recommendation",
+    "machine-learning"
+   ],
+   "wikipedia": "Learning_to_rank",
+   "wikidata": "Q4330127",
+   "related": [
+    "search-relevance",
+    "recommender-systems",
+    "search-evaluation"
+   ],
+   "description": "Training models that order results."
+  },
+  {
+   "id": "search-relevance",
+   "label": "Search relevance",
+   "areas": [
+    "search-and-recommendation"
+   ],
+   "wikipedia": "Relevance_(information_retrieval)",
+   "wikidata": "Q1472529",
+   "related": [
+    "learning-to-rank",
+    "search-evaluation",
+    "semantic-search",
+    "recommender-systems"
+   ],
+   "description": "Making search return the right results, and knowing that it does."
+  },
+  {
+   "id": "search-evaluation",
+   "label": "Search evaluation",
+   "areas": [
+    "search-and-recommendation",
+    "data-science"
+   ],
+   "wikipedia": "Evaluation_measures_(information_retrieval)",
+   "wikidata": "Q25211005",
+   "related": [
+    "search-relevance",
+    "learning-to-rank",
+    "model-evaluation",
+    "experimentation"
+   ],
+   "description": "Relevance judgments, metrics such as NDCG, and online tests for search."
+  },
+  {
+   "id": "semantic-search",
+   "label": "Semantic search",
+   "areas": [
+    "search-and-recommendation",
+    "artificial-intelligence"
+   ],
+   "wikipedia": "Semantic_search",
+   "wikidata": "Q1891170",
+   "related": [
+    "search-relevance",
+    "vector-databases",
+    "retrieval-augmented-generation",
+    "natural-language-processing"
+   ],
+   "description": "Search by meaning with embeddings."
+  },
+  {
+   "id": "vector-databases",
+   "label": "Vector databases",
+   "areas": [
+    "search-and-recommendation",
+    "data-engineering"
+   ],
+   "wikipedia": "Vector_database",
+   "wikidata": "Q118396004",
+   "related": [
+    "semantic-search",
+    "retrieval-augmented-generation"
+   ],
+   "description": "Storing and querying embeddings at scale."
+  },
+  {
+   "id": "recommender-systems",
+   "label": "Recommender systems",
+   "areas": [
+    "search-and-recommendation",
+    "machine-learning"
+   ],
+   "wikipedia": "Recommender_system",
+   "wikidata": "Q554950",
+   "related": [
+    "learning-to-rank",
+    "search-relevance",
+    "experimentation"
+   ],
+   "description": "Suggesting items to people: candidate generation, ranking, cold start."
+  },
+  {
+   "id": "data-pipelines",
+   "label": "Data pipelines and ETL",
+   "areas": [
+    "data-engineering"
+   ],
+   "wikipedia": "Extract,_transform,_load",
+   "wikidata": "Q1276130",
+   "related": [
+    "stream-processing",
+    "data-warehousing",
+    "data-quality",
+    "feature-engineering"
+   ],
+   "description": "Extracting, transforming and loading data on a schedule or on demand."
+  },
+  {
+   "id": "stream-processing",
+   "label": "Stream processing",
+   "areas": [
+    "data-engineering"
+   ],
+   "wikipedia": "Stream_processing",
+   "wikidata": "Q2006448",
+   "related": [
+    "data-pipelines"
+   ],
+   "description": "Processing data continuously as it arrives."
+  },
+  {
+   "id": "data-warehousing",
+   "label": "Data warehousing",
+   "areas": [
+    "data-engineering",
+    "data-science"
+   ],
+   "wikipedia": "Data_warehouse",
+   "wikidata": "Q193351",
+   "related": [
+    "data-pipelines",
+    "data-quality"
+   ],
+   "description": "Modeling and storing data for analysis."
+  },
+  {
+   "id": "data-quality",
+   "label": "Data quality",
+   "areas": [
+    "data-engineering"
+   ],
+   "wikipedia": "Data_quality",
+   "wikidata": "Q1757694",
+   "related": [
+    "data-pipelines",
+    "data-warehousing",
+    "model-monitoring"
+   ],
+   "description": "Testing and monitoring data so it can be trusted."
+  },
+  {
+   "id": "experimentation",
+   "label": "Experimentation and A/B testing",
+   "areas": [
+    "data-science"
+   ],
+   "wikipedia": "A/B_testing",
+   "wikidata": "Q1810071",
+   "related": [
+    "causal-inference",
+    "search-evaluation",
+    "recommender-systems",
+    "model-evaluation",
+    "llm-evaluation"
+   ],
+   "description": "Designing and reading controlled experiments."
+  },
+  {
+   "id": "causal-inference",
+   "label": "Causal inference",
+   "areas": [
+    "data-science",
+    "machine-learning"
+   ],
+   "wikipedia": "Causal_inference",
+   "wikidata": "Q5054566",
+   "related": [
+    "experimentation"
+   ],
+   "description": "Estimating effects when you can't run an experiment, and when you can."
+  },
+  {
+   "id": "data-visualization",
+   "label": "Data visualization",
+   "areas": [
+    "data-science"
+   ],
+   "wikipedia": "Data_visualization",
+   "wikidata": "Q133505171",
+   "related": [],
+   "description": "Charts that show the truth in data."
+  },
+  {
+   "id": "time-series-forecasting",
+   "label": "Time series forecasting",
+   "areas": [
+    "data-science",
+    "machine-learning"
+   ],
+   "wikipedia": "Time_series",
+   "wikidata": "Q186588",
+   "related": [],
+   "description": "Predicting values that change over time."
+  }
+ ]
+}

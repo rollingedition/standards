@@ -1,0 +1,40 @@
+# What a book repository's generated README, CITATION.cff and licence files point to (re-check readme).
+# Site paths mirror [paths.com] in the platform's config; a platform test keeps them in step.
+
+publisher = "Rolling Edition"
+about = "Rolling Edition publishes free technical books that AI drafts, people verify, and an automated pipeline keeps current."
+disclosure = "Written with AI. Verified by people."
+draft_banner = "Draft: not yet published"     # on a draft's README; its first edition is published after agent review
+code_copyright = "Copyright (c) Rolling Edition and contributors"
+
+site = "https://rollingedition.com"
+github = "https://github.com/rollingedition"
+repo = "book-{book}"
+
+[paths]
+book = "/{book}"
+chapter = "/{book}/{chapter_id}"
+changes = "/{book}/changes"
+cover = "/{book}/cover.svg"
+stamp = "/{book}/stamp.svg"
+icon = "/assets/logos/rolling-edition-icon.svg"
+editorial = "/policies/editorial"
+check = "/check"
+preview = "/previews/{book}"
+preview_chapter = "/previews/{book}/{chapter_id}"
+
+# How a book may be reused, as every page of rollingedition.com words it: [reuse] in the platform's config, kept in
+# step by a platform test. CC BY 4.0 asks for credit, a link to the licence and a note of changes; MIT asks that its
+# copyright and permission notice stay with the code. {copyright} is code_copyright, above.
+[reuse]
+short = "Text is CC BY 4.0 and code is MIT. Credit Rolling Edition, link back to the book and to the licence, and say what you changed."
+full = "Book text is CC BY 4.0: credit Rolling Edition, link back to the book and to the licence, and say what you changed. Code examples are MIT: keep the notice “{copyright}” and the MIT terms with any code you copy."
+
+[links]
+writing_standards = "https://github.com/rollingedition/standards/blob/main/writing/README.md"
+contributing = "https://github.com/rollingedition/.github/blob/main/CONTRIBUTING.md"
+conduct = "https://github.com/rollingedition/.github/blob/main/CODE_OF_CONDUCT.md"
+
+[levels]                      # who a book is for, when book.toml gives no reader sentence
+foundations = "For readers new to the field."
+in-practice = "For readers already working in the field."

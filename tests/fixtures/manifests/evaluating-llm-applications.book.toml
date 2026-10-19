@@ -1,0 +1,10 @@
+slug = "evaluating-llm-applications"
+title = "Evaluating LLM Applications"
+summary = "Test sets, graders, regression suites and monitoring."
+status = "draft"
+level = "in-practice"                # foundations | in-practice
+skills = ["llm-evaluation", "large-language-models", "retrieval-augmented-generation", "model-monitoring"]
+line = "main"
+core_libraries = []
+expert_reviewer = ""
+sponsor = ""

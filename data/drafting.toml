@@ -1,0 +1,12 @@
+# The model bar for drafting Rolling Edition books: the models a book may be drafted with. A proposed default: change it here, never in code.
+#
+# Books are drafted with Claude Opus 5.5, or a model that is equivalent or better. Equivalent or better models may be
+# added to `models`. Open models stay allowed only for recorded outputs (W-48, `recordings/`), never for drafting, so
+# this list doesn't apply to a recording's `model`.
+#
+# Nothing reads or enforces the list yet: the writer prompt (`prompts/writer.md`) names it.
+
+[drafting]
+models = [
+  "claude-opus-5-5",   # Claude Opus 5.5
+]

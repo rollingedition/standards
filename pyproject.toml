@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "re-standards"
+version = "0.1.0"
+description = "Rolling Edition standards: book checks, the catalog taxonomy and the reference tape encoder"
+requires-python = ">=3.11"
+dependencies = ["markdown-it-py", "pyyaml"]
+
+[project.scripts]
+re-check = "re_standards.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["re_standards*"]

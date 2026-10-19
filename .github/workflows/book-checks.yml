@@ -1,0 +1,81 @@
+# The checks every book pull request runs. Book repos call this reusable workflow.
+# It runs with read-only permissions, no secrets and no deploy rights. Each job is one required status.
+name: Book checks
+
+on:
+  workflow_call:
+    inputs:
+      standards-ref:
+        description: The standards version whose checks run
+        type: string
+        default: v1
+
+permissions:
+  contents: read
+
+jobs:
+  examples:
+    name: examples
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: rollingedition/standards
+          ref: ${{ inputs.standards-ref }}
+          path: .standards
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install the checks
+        if: ${{ !env.RE_LOCAL }}
+        run: pip install --quiet -e ./.standards
+      - name: Run every example in its pinned runtime and compare its output
+        run: re-check examples --book . --report "$RUNNER_TEMP/examples-report.json"
+
+  manifest:
+    name: manifest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: rollingedition/standards
+          ref: ${{ inputs.standards-ref }}
+          path: .standards
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install the checks
+        if: ${{ !env.RE_LOCAL }}
+        run: pip install --quiet -e ./.standards
+      - name: Validate book.toml against the taxonomy
+        run: re-check manifest --book .
+      - name: Check the generated front page (README, CITATION.cff, licences)
+        run: re-check readme --book .
+
+  section-ids:
+    name: section-ids
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: rollingedition/standards
+          ref: ${{ inputs.standards-ref }}
+          path: .standards
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install the checks
+        if: ${{ !env.RE_LOCAL }}
+        run: pip install --quiet -e ./.standards
+      - name: Check IDs against the base commit and the latest edition
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: re-check section-ids --book . --base-ref "$BASE_SHA" --previous "${RE_PREVIOUS_SECTIONS:-latest}"

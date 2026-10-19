@@ -1,0 +1,33 @@
+# Every book pull request needs at least one kind: label before it can merge: an edition's kinds come from these labels.
+# Runs again whenever labels change, so the triage agent's labels turn it green.
+name: Kind label
+
+on:
+  workflow_call:
+    inputs:
+      standards-ref:
+        type: string
+        default: v1
+
+permissions:
+  contents: read
+
+jobs:
+  kind-label:
+    name: kind-label
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: rollingedition/standards
+          ref: ${{ inputs.standards-ref }}
+          path: .standards
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install the checks
+        if: ${{ !env.RE_LOCAL }}
+        run: pip install --quiet -e ./.standards
+      - name: Require a kind label
+        run: re-check kind-label --event "$GITHUB_EVENT_PATH"

@@ -1,0 +1,30 @@
+# Limits and word lists for `re-check style`, the lint half of the writing standards
+# (standards/writing/README.md). Rule IDs in comments. Defaults; change them here, never in code.
+
+[length]                       # W-7, W-18
+chapter_words = [3000, 6000]
+section_words = [200, 900]     # a ## section, including its ### subsections
+book_chapters = [5, 12]        # checked once a book's status is live
+example_lines = 40             # non-blank lines; the standard says "about 30"
+table_columns = 6              # W-53: the most columns a table may have
+
+[words]
+# W-24: phrases that date the text. "now" and "new" are left to the critic: they are fine for steps in a procedure.
+time = ["recently", "currently", "as of this writing", "at the time of writing", "the latest", "nowadays",
+        "these days", "modern", "soon", "new in", "newly", "state of the art", "state-of-the-art", "cutting edge"]
+# W-35: minimizers and hype. Superlatives used as measured facts ("the best-scoring model") are left to the critic.
+banned = ["simply", "just", "easy", "easily", "obviously", "clearly", "of course", "powerful", "seamless",
+          "seamlessly", "cutting-edge", "revolutionary", "leverage", "leverages", "leveraging", "leveraged",
+          "utilize", "utilizes", "utilizing", "dive into", "dives into", "delve", "delves", "ultimate",
+          "world-class", "best-in-class", "game-changing", "game changer"]
+# W-25: other names a pinned package goes by in prose
+aliases = { scikit-learn = ["sklearn"], python = ["Python"] }
+
+[headings]                     # W-36: words that keep their capitals in a sentence-case heading
+proper_nouns = ["Python", "BM25", "Wayfair", "WANDS", "Rolling", "Edition", "English", "Google", "Bing",
+                "Amazon", "Elasticsearch", "OpenSearch", "Solr", "Lucene", "Okapi", "TREC", "MS", "MARCO",
+                "LambdaMART", "RankNet", "LightGBM", "XGBoost", "SPLADE", "ColBERT", "HyDE", "RAG", "LLM", "LLMs",
+                "A/B", "I", "Bayes", "Markov", "Gaussian", "Fourier", "Jaccard", "Kendall", "Spearman", "Pearson"]
+
+[recordings]                   # W-48: every recorded output folder carries a manifest with these keys
+manifest = ["script", "model", "model_version", "prompt_sha256", "created", "outputs"]

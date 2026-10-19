@@ -1,0 +1,10 @@
+slug = "recommender-systems-for-e-commerce"
+title = "Recommender Systems for E-commerce"
+summary = "Candidate generation, ranking, experimentation, cold start."
+status = "draft"
+level = "in-practice"                # foundations | in-practice
+skills = ["recommender-systems", "learning-to-rank", "experimentation"]
+line = "main"
+core_libraries = []
+expert_reviewer = ""
+sponsor = ""

@@ -26,6 +26,6 @@ def test_the_wordmark_is_cropped_to_its_ink_and_the_lockup_keeps_its_proportions
 
 
 def test_a_cover_footer_shows_the_icon_and_the_wordmark():
-    svg = cover.render_cover("A Tiny Book", "2026.10.1", "7K3M-Q9TD", 1)
+    svg = cover.render_cover("A Tiny Book", "2026.10.1", "7K3M-Q9TD", 1, "2026-10-19T12:00:00Z")
     assert mark.outlines()["icon"]["path"] in svg
     assert '<tspan font-style="italic">Rolling</tspan> Edition</text>' in svg and "IBM Plex Sans" not in svg.split("Rolling</tspan>")[0][-300:]

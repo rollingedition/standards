@@ -1,4 +1,4 @@
-"""Cover SVG: the title, its punched tape, the edition fingerprint, the edition ticks and the footer.
+"""Cover SVG: the title, its punched tape, the edition fingerprint, the edition line and the footer.
 
 The executable form of the cover-generation spec. Layout is in 300 x 480 cover units; the 1600 x 2560
 master is the same layout scaled by 16/3. Standard library only, plus optional fontTools for real
@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from datetime import datetime
 from functools import cache
 from xml.sax.saxutils import escape
 
@@ -23,7 +24,7 @@ from .tape import fingerprint_columns, parse_code, title_strips, bits5
 # Cover tokens: the same values in both themes, because a cover is an image and never flips.
 COVER_GROUND = "#1f3d3b"     # deep teal
 COVER_PAPER = "#fbf5e6"      # buff, the colour of paper tape
-COVER_TAIL = "#e58f2a"       # amber: the fingerprint, the newest tick and the icon's tile
+COVER_TAIL = "#e58f2a"       # amber: the fingerprint and the icon's tile
 INK = "#1b1712"              # the icon's R, as on every icon
 COVER_MUTED = "#a8c4c0"
 
@@ -36,7 +37,8 @@ TITLE_SIZE, TITLE_MIN_SIZE, TITLE_LEADING, TITLE_MAX_LINES = 25.0, 20.0, 1.14, 3
 FIELD_GAP = 20                        # title zone to tape field
 FIELD_W, FIELD_H = 244, 230
 CODE_SIZE, CODE_OFFSET, CODE_LINE = 11, 6, 14
-TICK_W, TICK_H, TICK_PITCH, TICK_MAX = 4, 12, 9, 24
+LINE_SIZE, LINE_RISE = 11, 16          # the edition line: the edition number's size, its baseline above the footer
+MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 FOOT_H, FOOT_GAP, MARK_SIZE = 22, 14, 22
 WORDMARK_SIZE, WORDMARK_GAP, CAP = 16, 6, 0.705   # the footer's wordmark: the icon is 1.4 times it
 
@@ -238,13 +240,22 @@ def strip_svg(cols: list[int], x0: float, y0: float, k: float, fill: str) -> lis
     return out
 
 
+def edition_line(editions: int, first_released: str) -> str:
+    """The line above the footer, read at a glance: how many editions the book has had and since when, as "3 editions
+    since Oct 2026", or "First edition, Oct 2026". `first_released` is the first edition's release time, ISO 8601."""
+    first = datetime.fromisoformat(first_released.replace("Z", "+00:00"))
+    since = f"{MONTHS[first.month - 1]} {first.year}"
+    return f"First edition, {since}" if editions == 1 else f"{editions} editions since {since}"
+
+
 def cover_alt(title: str, edition: str, code: str) -> str:
     return f"Cover of {title}, edition {edition}, code {parse_code(code)}"
 
 
-def render_cover(title: str, edition: str, code: str, editions: int, width: int = MASTER_W, outlined: bool = False) -> str:
-    """The SVG for one cover. `editions` counts released editions, including this one. `outlined` draws its text as
-    outlines, for a cover file."""
+def render_cover(title: str, edition: str, code: str, editions: int, first_released: str, width: int = MASTER_W,
+                 outlined: bool = False) -> str:
+    """The SVG for one cover. `editions` counts released editions, including this one, and `first_released` is when
+    the first came out, for the edition line. `outlined` draws its text as outlines, for a cover file."""
     if editions < 1:
         raise ValueError("a cover needs at least one edition")
     size, lines = fit_title(title)
@@ -283,19 +294,15 @@ def render_cover(title: str, edition: str, code: str, editions: int, width: int 
             f'<text x="{code_x:.2f}" y="{code_y:.2f}" font-family="\'IBM Plex Mono\', ui-monospace, monospace" '
             f'font-weight="500" font-size="{CODE_SIZE}" letter-spacing="{0.08 * CODE_SIZE:.2f}" fill="{COVER_TAIL}">{parse_code(code)}</text>'
         )
-    # footer: edition ticks, then the icon, the wordmark and the edition number
+    # footer: the edition line, then the icon, the wordmark and the edition number
     foot_top = COVER_H - MARGIN_BOTTOM - FOOT_H
-    tick_top = foot_top - FOOT_GAP - TICK_H
-    shown = min(editions, TICK_MAX)
-    for i in range(shown):
-        fill, opacity = (COVER_TAIL, "") if i == shown - 1 else (COVER_PAPER, ' opacity="0.45"')
-        o.append(f'<rect x="{MARGIN_X + i * TICK_PITCH}" y="{tick_top}" width="{TICK_W}" height="{TICK_H}" rx="2" fill="{fill}"{opacity}/>')
-    if editions > TICK_MAX and outlined:
-        o.append(outlined_text(f"+{editions - TICK_MAX}", "mono", 9, MARGIN_X + shown * TICK_PITCH + 2, tick_top + 10, COVER_MUTED))
-    elif editions > TICK_MAX:
+    line, line_y = edition_line(editions, first_released), foot_top - LINE_RISE
+    if outlined:
+        o.append(outlined_text(line, "mono", LINE_SIZE, MARGIN_X, line_y, COVER_MUTED))
+    else:
         o.append(
-            f'<text x="{MARGIN_X + shown * TICK_PITCH + 2}" y="{tick_top + 10}" font-family="\'IBM Plex Mono\', ui-monospace, monospace" '
-            f'font-weight="500" font-size="9" fill="{COVER_MUTED}">+{editions - TICK_MAX}</text>'
+            f'<text x="{MARGIN_X}" y="{line_y}" font-family="\'IBM Plex Mono\', ui-monospace, monospace" '
+            f'font-weight="500" font-size="{LINE_SIZE}" fill="{COVER_MUTED}">{escape(line)}</text>'
         )
     o.append(mark.fragment(MARGIN_X, foot_top, MARK_SIZE, COVER_TAIL, INK))
     mid = foot_top + FOOT_H / 2

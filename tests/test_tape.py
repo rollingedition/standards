@@ -81,30 +81,41 @@ def test_history_column():
     assert tape.KIND_LABELS == ["kind:prose", "kind:deps", "kind:content"]
 
 
+FIRST = "2026-10-19T12:00:00Z"
+
+
 def test_render_cover():
-    svg = cover.render_cover("Building Reliable Data Pipelines with Apache Airflow", "2028.02.1", "DKF3-R7TH", 30)
+    svg = cover.render_cover("Building Reliable Data Pipelines with Apache Airflow", "2028.02.1", "DKF3-R7TH", 30, FIRST)
     assert svg.startswith("<svg") and 'viewBox="0 0 300 480"' in svg and 'width="1600"' in svg
-    assert ">+6</text>" in svg                       # 24 ticks shown, 6 more counted
+    assert ">30 editions since Oct 2026</text>" in svg      # read at a glance, however many editions
     assert "Cover of Building Reliable Data Pipelines with Apache Airflow, edition 2028.02.1, code DKF3-R7TH" in svg
     with pytest.raises(ValueError):
-        cover.render_cover("A title", "2028.02.1", "DKF3-R7TH", 0)
+        cover.render_cover("A title", "2028.02.1", "DKF3-R7TH", 0, FIRST)
 
 
-def test_a_new_edition_changes_only_the_fingerprint_ticks_and_number():
-    a = cover.render_cover("Pipeline Demo", "2026.10.1", "DKF3-R7TH", 1).splitlines()
-    b = cover.render_cover("Pipeline Demo", "2026.10.2", "483B-Z9SS", 2).splitlines()
+def test_the_edition_line_says_how_many_editions_and_since_when():
+    assert cover.edition_line(1, FIRST) == "First edition, Oct 2026"
+    assert cover.edition_line(3, FIRST) == "3 editions since Oct 2026"
+    assert cover.edition_line(124, "2026-09-30T23:59:00+00:00") == "124 editions since Sep 2026"
+
+
+def test_a_new_edition_changes_only_the_fingerprint_line_and_number():
+    a = cover.render_cover("Pipeline Demo", "2026.10.1", "DKF3-R7TH", 1, FIRST).splitlines()
+    b = cover.render_cover("Pipeline Demo", "2026.10.2", "483B-Z9SS", 2, FIRST).splitlines()
     title_tape = [line for line in a if 'fill="#fbf5e6"/>' in line and line.startswith("<polygon")]
     assert title_tape and all(line in b for line in title_tape)   # the title strip is unchanged
-    assert sum('<rect x=' in line and 'height="12"' in line for line in b) == 2
+    assert any(">First edition, Oct 2026</text>" in line for line in a)
+    assert any(">2 editions since Oct 2026</text>" in line for line in b)
 
 
 def test_an_outlined_cover_is_the_same_cover_with_its_text_as_outlines():
-    args = ("Building Reliable Data Pipelines with Apache Airflow", "2028.02.1", "DKF3-R7TH", 30)
+    args = ("Building Reliable Data Pipelines with Apache Airflow", "2028.02.1", "DKF3-R7TH", 30, FIRST)
     live, outlined = cover.render_cover(*args), cover.render_cover(*args, outlined=True)
     assert "<text" in live and "<text" not in outlined and "<tspan" not in outlined
     shapes = lambda svg: [line for line in svg.splitlines() if line.startswith(("<svg", "<title", "<rect", "<polygon", "<circle"))]
-    assert shapes(outlined) == shapes(live)              # the frame, alt text, tape, ticks and icon are untouched
+    assert shapes(outlined) == shapes(live)              # the frame, alt text, tape and icon are untouched
     assert outlined.count('<g fill="#e58f2a">') == 1     # the code under the fingerprint, in cover-tail
+    assert outlined.count(f'<g fill="{cover.COVER_MUTED}">') == 2   # the edition line and the edition number
 
 
 def test_glyph_runs_kern_and_ligate_as_live_text_does():

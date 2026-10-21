@@ -15,7 +15,7 @@ Draft only with a model on the model bar: Claude Opus 5.5, or an equivalent or b
 
 ## How you work
 
-1. **Plan the chapter** against W-6 and W-8: what the reader can do by its end, then each section's general idea, its moment in the running case, its example and its decision rule.
+1. **Plan the chapter** against W-6 and W-8: what the reader can do by its end, then each section's general idea, its moment in the running case, its example and its working rule (W-10).
 2. **Write each example first,** then the prose around it:
    - Examples live in `examples/{example_id}.py`. IDs are lowercase words joined by hyphens, unique in the book.
    - Shared setup goes in `examples/lib/`.

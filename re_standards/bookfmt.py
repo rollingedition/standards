@@ -462,12 +462,15 @@ def render_chapter(chapter: Chapter, example_html: Callable[[str], str],
                    code_block: Callable[[str, str], str] | None = None,
                    bind: Callable[[str], str] | None = None,
                    link: Callable[[str], str | None] | None = None,
-                   table_wrap: tuple[str, str] | None = None) -> str:
+                   table_wrap: tuple[str, str] | None = None,
+                   working_rule: tuple[str, ...] = ()) -> str:
     """HTML for a chapter's body, without its # title. Section headings get their IDs; embed
     paragraphs become whatever example_html returns; fenced code goes through code_block(code, language);
     bind (usually Book.bind) fills in output and version bindings first; link turns the ID in an
     internal link, [text](#any-id), into the href to use, so a link can reach another chapter; table_wrap is
-    the HTML to open before each table and close after it."""
+    the HTML to open before each table and close after it. A paragraph that opens with one of the working_rule
+    labels in bold, as "**Working rule:**", gets class "working-rule", and its label class "working-rule-label"
+    with the colon kept for screen readers only."""
     md = new_markdown()
     if code_block is not None:
         md.options["highlight"] = lambda content, lang, attrs: code_block(content, lang)
@@ -512,6 +515,8 @@ def render_chapter(chapter: Chapter, example_html: Callable[[str], str],
             out.append(block)
             i += 3
             continue
+        if working_rule and tok.type == "paragraph_open":
+            _mark_working_rule(tok, tokens[i + 1], working_rule)
         if table_wrap and tok.type in ("table_open", "table_close"):
             wrap = Token("html_block", "", 0)
             wrap.content = table_wrap[0] if tok.type == "table_open" else table_wrap[1]
@@ -521,6 +526,20 @@ def render_chapter(chapter: Chapter, example_html: Callable[[str], str],
         out.append(tok)
         i += 1
     return md.renderer.render(out, md.options, {})
+
+
+def _mark_working_rule(paragraph: Token, inline: Token, labels: tuple[str, ...]) -> None:
+    kids = inline.children or []
+    lead = 1 if kids and kids[0].type == "text" and not kids[0].content else 0     # markdown-it opens with an empty text
+    strong, label, close = (kids[lead:lead + 3] + [None] * 3)[:3]
+    if (strong is not None and strong.type == "strong_open" and label.type == "text" and close is not None
+            and close.type == "strong_close" and label.content.endswith(":") and label.content[:-1] in labels):
+        paragraph.attrSet("class", "working-rule")
+        strong.attrSet("class", "working-rule-label")
+        label.content = label.content[:-1]
+        colon = Token("html_inline", "", 0)
+        colon.content = '<span class="visually-hidden">:</span>'
+        kids.insert(lead + 2, colon)
 
 
 def _strip_heading_id(inline: Token) -> None:

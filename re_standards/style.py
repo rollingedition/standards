@@ -28,6 +28,9 @@ VERSION_NUMBER = r"v?\d+(?:\.\d+)+"
 # Quoted text is the source's wording, not ours, so W-24 and W-35 skip it. "As soon as" means "when".
 QUOTED = re.compile(r'"[^"]*"|“[^”]*”')
 NOT_TIME = re.compile(r"\bas\s+soon\s+as\b", re.IGNORECASE)
+LEAD = re.compile(r"^\*\*([^*]+):\*\*")       # a paragraph's bold label, as in "**Working rule:**"
+SECTION_HEADING = re.compile(r"^#{2,3} ")
+LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")
 
 
 def load_config(path: Path | None = None) -> dict:
@@ -47,6 +50,76 @@ def _prose_lines(body: str, offset: int, raw: bool = False) -> list[tuple[int, s
             continue
         out.append((n, line if raw else LINK_TARGET.sub("]", CODE_SPAN.sub(" ", BINDING.sub(" ", line)))))
     return out
+
+
+def _section_parts(body: str, offset: int) -> list[tuple[int, list[tuple[str, int, str]]]]:
+    """Each ## or ### heading's own text, up to the next heading of either level, as (level, blocks). A block is
+    (kind, first line, text), and its kind is "paragraph", "list", "table", "code", "embed", "figure" or "quote"."""
+    parts: list[tuple[int, list[tuple[str, int, str]]]] = []
+    blocks: list[tuple[str, int, str]] | None = None
+    fenced, open_block = False, False
+    for n, line in enumerate(body.split("\n"), offset + 1):
+        stripped = line.strip()
+        if FENCE.match(stripped):
+            if not fenced and blocks is not None:
+                blocks.append(("code", n, ""))
+            fenced, open_block = not fenced, False
+            continue
+        if fenced:
+            continue
+        if SECTION_HEADING.match(line):
+            blocks = []
+            parts.append((len(line) - len(line.lstrip("#")), blocks))
+            open_block = False
+        elif blocks is None or line.startswith("# "):
+            continue
+        elif not stripped:
+            open_block = False
+        elif open_block:
+            kind, start, text = blocks[-1]
+            blocks[-1] = (kind, start, text + "\n" + line)
+        else:
+            kind = ("embed" if EMBED_LINE.match(line) else "figure" if IMAGE.match(stripped) else "list" if LIST_ITEM.match(line)
+                    else "table" if stripped.startswith("|") else "quote" if stripped.startswith(">") else "paragraph")
+            blocks.append((kind, n, line))
+            open_block = True
+    return parts
+
+
+def _working_rules(file: str, body: str, offset: int, rule: dict) -> list[str]:
+    """W-10, its mechanical half. A ## section, with its ### subsections, closes with a working rule labelled as
+    config says, unless it ends in a list or table, as a chapter's summary does. A ### subsection, or the text
+    before it, may close with a rule of its own; a rule anywhere else is out of place. Whether a rule is a good
+    one is the critic's to judge."""
+    label, retired = rule["label"], set(rule.get("retired", []))
+    problems: list[str] = []
+
+    def is_rule(block):
+        lead = LEAD.match(block[2]) if block[0] == "paragraph" else None
+        return lead is not None and (lead.group(1) == label or lead.group(1) in retired)
+
+    sections: list[list[tuple[str, int, str]]] = []
+    for level, blocks in _section_parts(body, offset):
+        if level == 2 or not sections:
+            sections.append([])
+        sections[-1] += blocks
+        rules = [b for b in blocks if is_rule(b)]
+        for b in rules:
+            lead = LEAD.match(b[2])
+            if lead.group(1) != label:
+                problems.append(f"{file}:{b[1]}: W-10: label the working rule \"**{label}:**\", not \"**{lead.group(1)}:**\"")
+            elif b[2][lead.end():].lstrip()[:1].islower():
+                problems.append(f"{file}:{b[1]}: W-10: start the working rule with a capital; the sites set its label "
+                                "on a line of its own")
+        closing = rules[-1] if rules and rules[-1] is blocks[-1] else None
+        for b in (b for b in rules if b is not closing):
+            problems.append(f"{file}:{b[1]}: W-10: a working rule closes its section; move what follows it above it, "
+                            "or make it a rule of its own section")
+    for blocks in sections:
+        if blocks and blocks[-1][0] == "paragraph" and not is_rule(blocks[-1]):
+            problems.append(f"{file}:{blocks[-1][1]}: W-10: close the section with its working rule, "
+                            f"a paragraph that opens with \"**{label}:**\"")
+    return problems
 
 
 def _words(text: str) -> int:
@@ -136,6 +209,8 @@ def check_style(book: Book, cfg: dict | None = None) -> list[str]:
                 if columns > lengths["table_columns"]:
                     problems.append(f"{c.file}:{n - 1}: W-53: a table with {columns} columns; keep it to {lengths['table_columns']} "
                                     "so it fits a phone, by putting the things compared in columns or splitting it")
+
+        problems += _working_rules(c.file, c.body, c.body_offset, cfg["working_rule"])
 
     problems += [f"W-26: {p}" for p in book.binding_problems()]
 

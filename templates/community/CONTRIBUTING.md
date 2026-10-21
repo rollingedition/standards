@@ -20,7 +20,7 @@ Rolling Edition books are free to read, and every book's text, examples and hist
 
 Follow the [writing standards]({standards}/blob/main/writing/README.md): every rule has an ID, and the checks and critics cite them. In short:
 
-- Explain the idea, then make it concrete with the book's running case, then say what to do.
+- Explain the idea, then make it concrete with the book's running case, then close with a working rule: what to do, when, and when to do something else.
 - Every claim about how a library or tool behaves is shown by an example in the book or sourced to its documentation, changelog or source code at the pinned version.
 - Never type a number an example prints, or a library's version: write a binding, such as `{{out:example-id:label}}` or `{{version:pandas}}`, and the build fills it in.
 - Examples run offline and give the same output every time. Model outputs are recorded once, with a manifest naming the model.

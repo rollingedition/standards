@@ -21,6 +21,8 @@ chapter_id: first-steps
 [Example: count](../examples/count.py)
 
 The export has {{{{out:count:unreadable amounts}}}} unreadable amounts, checked with pandas {{{{version:pandas}}}}.
+
+**Working rule:** Coerce, count, then decide.
 '''
 
 COUNT = ('print("unreadable amounts:", 1)\nprint("rows:", 9)\n', "unreadable amounts: 1\nrows: 9\n")
@@ -163,3 +165,47 @@ def test_the_renderer_wraps_tables_only_when_asked(tmp_path):
     assert "<table>" in plain and "frame" not in plain
     assert wrapped.count('<div class="frame">') == 1 and "</table>\n</div>" in wrapped
     assert wrapped.index('<div class="frame">') < wrapped.index("<table>")
+
+
+def w10(tmp_path, chapter):
+    return [p for p in lint(book_with(tmp_path, chapter=chapter)) if "W-10" in p]
+
+
+def test_a_section_closes_with_one_working_rule_under_its_label(tmp_path):
+    """W-10: the label comes from config, so a retired one is named, and a rule that isn't last, a second rule or a
+    section that ends in a plain paragraph is out of place."""
+    assert w10(tmp_path / "ok", CHAPTER) == []
+    retired = w10(tmp_path / "old", CHAPTER.replace("**Working rule:**", "**What to do:**"))
+    assert len(retired) == 1 and '"**Working rule:**", not "**What to do:**"' in retired[0] and ":17:" in retired[0]
+    missing = w10(tmp_path / "missing", CHAPTER.replace("**Working rule:** Coerce", "Coerce"))
+    lower = w10(tmp_path / "lower", CHAPTER.replace("**Working rule:** Coerce", "**Working rule:** coerce"))
+    assert len(lower) == 1 and "start the working rule with a capital" in lower[0]
+    assert len(missing) == 1 and "close the section with its working rule" in missing[0]
+    early = w10(tmp_path / "early", CHAPTER.replace("**Working rule:** Coerce, count, then decide.\n",
+                                                    "**Working rule:** Coerce, count, then decide.\n\nOne more thing.\n"))
+    assert any("move what follows it above it" in p for p in early) and any("close the section" in p for p in early)
+    twice = w10(tmp_path / "twice", CHAPTER.replace("\n[Example: count]", "\n**Working rule:** Count first.\n\n[Example: count]"))
+    assert len(twice) == 1 and "move what follows it above it" in twice[0]
+
+
+def test_subsections_may_close_with_rules_and_summaries_need_none(tmp_path):
+    """A ### subsection, or the text before it, may close with its own rule; the ## section's last rule may come
+    at the end of its last subsection; and a section that ends in a list, like a chapter's summary, has none."""
+    chapter = CHAPTER.replace("**Working rule:** Coerce, count, then decide.\n", "### Then decide {#then-decide}\n\n"
+                              "**Working rule:** Coerce, count, then decide.\n") + (
+        "\n## Decide again {#decide-again}\n\nWords.\n\n**Working rule:** Decide.\n\n### A detail {#a-detail}\n\nMore.\n\n"
+        "**Working rule:** Decide twice.\n\n## What this chapter decided {#decided}\n\n- **Coerce.** Then count.\n")
+    assert w10(tmp_path, chapter) == []
+
+
+def test_the_renderer_marks_working_rules_only_when_asked(tmp_path):
+    book = book_with(tmp_path)
+    chapter = book.chapters[0]
+    chapter.body += "\n**What to do:** an earlier label.\n\n**Not a rule:** a bold start.\n"
+    plain = bookfmt.render_chapter(chapter, lambda eid: "", bind=book.bind)
+    assert "working-rule" not in plain and "<strong>Working rule:</strong> Coerce" in plain
+    marked = bookfmt.render_chapter(chapter, lambda eid: "", bind=book.bind, working_rule=("Working rule", "What to do"))
+    assert ('<p class="working-rule"><strong class="working-rule-label">Working rule<span class="visually-hidden">:</span>'
+            '</strong> Coerce, count, then decide.</p>') in marked
+    assert '<strong class="working-rule-label">What to do<span' in marked and "<p><strong>Not a rule:</strong>" in marked
+    assert marked.count('class="working-rule"') == 2

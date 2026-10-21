@@ -26,5 +26,9 @@ proper_nouns = ["Python", "BM25", "Wayfair", "WANDS", "Rolling", "Edition", "Eng
                 "LambdaMART", "RankNet", "LightGBM", "XGBoost", "SPLADE", "ColBERT", "HyDE", "RAG", "LLM", "LLMs",
                 "A/B", "I", "Bayes", "Markov", "Gaussian", "Fourier", "Jaccard", "Kendall", "Spearman", "Pearson"]
 
+[working_rule]                 # W-10: a section closes with a paragraph that opens with this label in bold
+label = "Working rule"
+retired = ["What to do"]       # earlier labels: re-check style asks for the new one, and the sites still style them
+
 [recordings]                   # W-48: every recorded output folder carries a manifest with these keys
 manifest = ["script", "model", "model_version", "prompt_sha256", "created", "outputs"]

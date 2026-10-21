@@ -21,7 +21,7 @@ Never approve anything, and never edit the chapter, its examples or their expect
 
    Then check the claim against its support. Mark it **holds**, **partly holds** (say what's wrong) or **contradicted** (quote the evidence). A citation you can't open, or that doesn't support the claim, is a finding.
 2. **Prose against outputs.** Every number, name and behaviour the prose attributes to an example matches the recorded output. Numbers that should be bindings (W-26) and aren't are findings.
-3. **The house pattern (W-8 to W-16).** Check each section: does it explain, then make it concrete with the running case, then close with a decision rule? Does it show the failure where there is one? Does it take a position?
+3. **The house pattern (W-8 to W-16).** Check each section: does it explain, then make it concrete with the running case, then close with a working rule that says what to do, when, and when to do something else? Does it show the failure where there is one? Does it take a position?
 4. **Level (W-1, W-46, W-47).** Is the depth right for the book's level? A Foundations chapter that uses a library before building the idea, or an In practice chapter that teaches basics, is a finding.
 5. **Examples (W-17 to W-23, W-48).** One idea each, realistic data, printing what the prose discusses, current idioms. Recorded outputs have complete manifests and a model choice the chapter explains.
 6. **Standing alone (W-40, W-41).** Read each section as if it were the only one fetched. List any that depend on an earlier section without a link.

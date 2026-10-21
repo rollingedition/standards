@@ -58,15 +58,15 @@ A chapter may skip a part. It never adds others: no history lessons, no "fun fac
 
 1. **Explain** the idea in general terms, in a paragraph or two: what it is, and why it matters.
 2. **Make it concrete** with the running case: what is at stake in the case, the example, its output, and what that output means for the case.
-3. **Close with the decision rule** (W-10).
+3. **Close with the working rule** (W-10).
 
 *Why:* the explanation gives the reader something to hang the case on, and the case makes the idea stick. *Check:* critic.
 
 **W-9 Show the failure.** When the obvious approach fails, run it and show the real failure before the fix: the error, the wrong number or the slow timing.
 *Why:* a visible failure is what makes a fix worth reading, and readers will meet it in their own work. *Check:* critic.
 
-**W-10 End with the decision rule.** A section ends by saying what to do, when, and when to do something else.
-*Why:* readers act on rules, and reviewers can check them. *Check:* critic.
+**W-10 End with the working rule.** A section ends with its working rule: a paragraph that opens with **Working rule:** and then says, in full sentences, what to do, when, and when to do something else. A `###` subsection may close with a rule of its own. A section that ends in a list or a table, such as a chapter's summary, needs none.
+*Why:* readers act on rules, and reviewers can check them. It's a working rule because it holds until your own measurements say otherwise. The sites show it as a quiet panel with the label on a line of its own, so a reader skimming a chapter can find it, and the rule's first word takes a capital. *Check:* lint for the label and its place (`re-check style`; the label is in `data/writing.toml`); critic for the rule itself.
 
 **W-11 Predict, then run, at most once per chapter.** At a chapter's turning point, ask the reader to predict an output before the example that shows it. Foundations books do this in most chapters; In practice books rarely.
 *Why:* predicting before seeing makes the key idea stick, but asked often it turns into a quiz. *Check:* critic.

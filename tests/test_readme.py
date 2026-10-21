@@ -139,3 +139,12 @@ def test_every_book_carries_the_workflows_that_run_its_checks(tmp_path):
     assert checks["permissions"] == labels["permissions"] == {"contents": "read"}
     (book.root / ".github" / "workflows" / "labels.yml").unlink()
     assert readme.check(book) == [".github/workflows/labels.yml is missing; run re-check readme --write"]
+
+
+def test_recorded_outputs_are_described_in_words_true_of_every_book(tmp_path):
+    book = book_at(tmp_path)
+    assert "recorded once" not in readme.readme(book)                          # nothing recorded, nothing said
+    (book.root / "examples" / "data" / "recorded" / "run").mkdir(parents=True)
+    text = readme.readme(book)
+    assert "Model outputs are recorded once in `examples/data/recorded/`" in text and "the examples never call a model" in text
+    assert "LLM judgments" not in text and "embeddings" not in text

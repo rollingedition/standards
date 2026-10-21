@@ -141,8 +141,10 @@ def readme(book: Book, cfg: dict | None = None) -> str:
         "",
     ]
     if recorded:
-        out += ["Model outputs, such as embeddings and LLM judgments, are recorded once in `examples/data/recorded/`, each "
-                "with a `manifest.json` naming the exact model and prompts, so the examples never call a model. "
+        # The same words for every book: what a book records differs (embeddings, an LLM's judgments, a model it
+        # trains itself), so naming examples here would be untrue of some book.
+        out += ["Model outputs are recorded once in `examples/data/recorded/`, each folder with a `manifest.json` that names "
+                "the model, its exact version and the script that recorded it, so the examples never call a model. "
                 "`recordings/` holds the scripts that record them again.", ""]
     if data_cards:
         out += ["Where the data comes from, and its licence: " + ", ".join(f"[`{p}`]({p})" for p in data_cards) + ".", ""]

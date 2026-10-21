@@ -146,10 +146,25 @@ class Backend:
                 "requirements_sha256": hashlib.sha256(runtime.requirements.encode()).hexdigest()}
 
 
+THREAD_VARS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
+
+
+def _thread_caps() -> dict:
+    """When this process may run on fewer CPUs than the machine has, as under taskset or a container's cpuset, cap the
+    numeric libraries' threads at that number. OpenBLAS and OpenMP otherwise start a thread for every CPU in the
+    machine, and pinned runs sharing a few CPUs slow past the timeout. An unpinned run, such as CI's, gets no cap and
+    runs exactly as before, so no recorded output can change with it."""
+    try:
+        allowed = len(os.sched_getaffinity(0))
+    except AttributeError:                                  # no CPU affinity on this platform, such as macOS
+        return {}
+    return {name: str(allowed) for name in THREAD_VARS} if allowed < (os.cpu_count() or allowed) else {}
+
+
 def _clean_env(extra: dict) -> dict:
     # Nothing from the caller's environment reaches an example: no user name, home folder or tokens.
     env = {"PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC",
-           "PYTHONHASHSEED": "0", "PYTHONIOENCODING": "utf-8", "PYTHONDONTWRITEBYTECODE": "1"}
+           "PYTHONHASHSEED": "0", "PYTHONIOENCODING": "utf-8", "PYTHONDONTWRITEBYTECODE": "1", **_thread_caps()}
     env.update(extra)
     return env
 

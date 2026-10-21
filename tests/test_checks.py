@@ -118,6 +118,16 @@ def test_examples_run_in_a_scratch_copy_with_a_clean_environment(tmp_path, monke
     assert not (root / "examples" / "scribble.txt").exists()
 
 
+def test_a_run_pinned_to_fewer_cpus_caps_the_numeric_libraries_threads(monkeypatch):
+    """Under taskset, OpenBLAS and OpenMP would still start a thread per CPU in the machine; an unpinned run is untouched."""
+    monkeypatch.setattr(examples.os, "cpu_count", lambda: 32)
+    monkeypatch.setattr(examples.os, "sched_getaffinity", lambda pid: {0, 1, 2, 3}, raising=False)
+    env = examples._clean_env({})
+    assert [env[v] for v in examples.THREAD_VARS] == ["4", "4", "4"]
+    monkeypatch.setattr(examples.os, "sched_getaffinity", lambda pid: set(range(32)), raising=False)
+    assert not set(examples.THREAD_VARS) & set(examples._clean_env({}))
+
+
 def test_unpinned_runtimes_are_rejected(tmp_path):
     root = make_book(tmp_path)
     with pytest.raises(examples.ExamplesError, match=".python-version is missing"):

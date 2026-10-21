@@ -119,7 +119,8 @@ def cmd_style(args) -> int:
 def cmd_readme(args) -> int:
     book = bookfmt.load_book(Path(args.book))
     problems = readme.check(book, write=args.write)
-    return report("Front page", problems, "README.md, CITATION.cff, LICENSE, LICENSE-CODE and renovate.json are " + ("written" if args.write else "up to date"))
+    return report("Front page", problems, "README.md, CITATION.cff, LICENSE, LICENSE-CODE, renovate.json and the check workflows are "
+                  + ("written" if args.write else "up to date"))
 
 
 def cmd_licences(args) -> int:

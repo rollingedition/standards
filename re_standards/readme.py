@@ -1,4 +1,5 @@
-"""A book repository's front page, generated: README.md, CITATION.cff, LICENSE, LICENSE-CODE and renovate.json.
+"""A book repository's front page, generated: README.md, CITATION.cff, LICENSE, LICENSE-CODE and renovate.json, and
+the two workflows that run the shared checks on every pull request.
 
 Everything comes from the repository itself (book.toml, the chapters, the examples) and from
 data/readme.toml, so nothing in these files is typed by hand. renovate.json is data/renovate.json, the same for
@@ -229,11 +230,21 @@ def licence_code(cfg: dict | None = None) -> str:
                                                                                   cfg["code_copyright"])
 
 
+def workflows(cfg: dict | None = None) -> dict[str, str]:
+    """Every book's .github/workflows: checks.yml runs the standards repository's book checks on each pull request, and
+    labels.yml reruns the kind-label check when labels change. Without them a pull request gets no checks, so it can
+    never be approved."""
+    cfg = cfg or load_config()
+    org = cfg["github"].rstrip("/").rsplit("/", 1)[-1]
+    return {f".github/workflows/{path.name}": path.read_text(encoding="utf-8").replace("{org}", org)
+            for path in sorted((TEMPLATES / "book" / "workflows").glob("*.yml"))}
+
+
 def files(book: Book, cfg: dict | None = None) -> dict[str, str]:
     cfg = cfg or load_config()
     return {"README.md": readme(book, cfg), "CITATION.cff": citation(book, cfg),
             "LICENSE": (TEMPLATES / "licenses" / "CC-BY-4.0.txt").read_text(encoding="utf-8"), "LICENSE-CODE": licence_code(cfg),
-            "renovate.json": renovate()}
+            "renovate.json": renovate(), **workflows(cfg)}
 
 
 def own_licences(cfg: dict | None = None) -> dict[str, str]:
@@ -250,6 +261,7 @@ def sync(root: Path, texts: dict[str, str], command: str, write: bool = False) -
         if current == text:
             continue
         if write:
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
         else:
             problems.append(f"{name} is {'missing' if current is None else 'out of date'}; run {command} --write")

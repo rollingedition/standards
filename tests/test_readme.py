@@ -87,7 +87,7 @@ def test_citation_cites_the_book_without_an_edition(tmp_path):
 
 def test_check_finds_stale_files_and_write_fixes_them(tmp_path):
     book = book_at(tmp_path)
-    assert len(readme.check(book)) == 5
+    assert len(readme.check(book)) == 7
     assert readme.check(book, write=True) == []
     assert readme.check(book) == []
     (book.root / "README.md").write_text("edited by hand\n")
@@ -126,3 +126,16 @@ def test_this_repository_carries_its_own_generated_licences():
     assert licences["LICENSE"].startswith("MIT License") and "Rolling Edition and contributors" in licences["LICENSE"]
     assert "Attribution 4.0 International" in licences["LICENSE-TEXT"]
     assert readme.check_own_licences() == []
+
+
+def test_every_book_carries_the_workflows_that_run_its_checks(tmp_path):
+    """A book without them gets no checks on its pull requests, so nothing could ever be approved or merged."""
+    book = book_at(tmp_path)
+    readme.check(book, write=True)
+    checks = yaml.safe_load((book.root / ".github" / "workflows" / "checks.yml").read_text())
+    labels = yaml.safe_load((book.root / ".github" / "workflows" / "labels.yml").read_text())
+    assert checks["jobs"]["checks"]["uses"] == "rollingedition/standards/.github/workflows/book-checks.yml@v1"
+    assert labels["jobs"]["labels"]["uses"] == "rollingedition/standards/.github/workflows/kind-label.yml@v1"
+    assert checks["permissions"] == labels["permissions"] == {"contents": "read"}
+    (book.root / ".github" / "workflows" / "labels.yml").unlink()
+    assert readme.check(book) == [".github/workflows/labels.yml is missing; run re-check readme --write"]

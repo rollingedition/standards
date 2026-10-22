@@ -348,7 +348,8 @@
     "stream-processing",
     "data-warehousing",
     "data-quality",
-    "feature-engineering"
+    "feature-engineering",
+    "data-governance"
    ],
    "description": "Extracting, transforming and loading data on a schedule or on demand."
   },
@@ -376,7 +377,8 @@
    "wikidata": "Q193351",
    "related": [
     "data-pipelines",
-    "data-quality"
+    "data-quality",
+    "data-governance"
    ],
    "description": "Modeling and storing data for analysis."
   },
@@ -391,9 +393,25 @@
    "related": [
     "data-pipelines",
     "data-warehousing",
-    "model-monitoring"
+    "model-monitoring",
+    "data-governance"
    ],
    "description": "Testing and monitoring data so it can be trusted."
+  },
+  {
+   "id": "data-governance",
+   "label": "Data governance",
+   "areas": [
+    "data-engineering"
+   ],
+   "wikipedia": "Data_governance",
+   "wikidata": "Q872685",
+   "related": [
+    "data-quality",
+    "data-warehousing",
+    "data-pipelines"
+   ],
+   "description": "Knowing what data you hold, who owns it, where it flows and who may see it."
   },
   {
    "id": "experimentation",

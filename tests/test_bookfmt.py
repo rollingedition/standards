@@ -104,6 +104,16 @@ def test_render_gives_headings_their_ids_and_replaces_embeds(tmp_path):
     assert "{#" not in html.replace("{#nope}", "")       # the fenced example keeps its text
 
 
+def test_a_heading_can_stay_its_title_alone_with_its_tools_right_after_it(tmp_path):
+    book = bookfmt.load_book(make_book(tmp_path))
+    html = bookfmt.render_chapter(book.chapters[0], lambda eid: "",
+                                  heading_after=lambda s: f'<div class="h-meta" data-for="{s.section_id}"></div>')
+    assert '<h2 id="load-data">Load the data</h2>\n<div class="h-meta" data-for="load-data"></div>' in html
+    assert '<h3 id="a-detail">A detail</h3>\n<div class="h-meta" data-for="a-detail"></div>' in html
+    plain = bookfmt.render_chapter(book.chapters[0], lambda eid: "")
+    assert "h-meta" not in plain                          # nothing after a heading unless asked
+
+
 def test_raw_html_in_book_text_is_escaped(tmp_path):
     chapter = CHAPTER.replace("Opening text.", "<script>alert(1)</script>")
     html = bookfmt.render_chapter(bookfmt.load_book(make_book(tmp_path, chapter=chapter)).chapters[0], lambda e: "")

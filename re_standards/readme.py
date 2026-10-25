@@ -47,15 +47,20 @@ def report_error_url(slug: str, cfg: dict) -> str:
     return f"{repo_url(slug, cfg)}/issues/new?template=report-an-error.yml"
 
 
-def _first_sentence(chapter_body: str) -> str:
-    """The first sentence after the chapter's title: by W-2, what the reader can do by its end."""
+def first_sentence(chapter_body: str) -> str:
+    """The chapter's first sentence, as written: by W-2, what the reader can do by its end ("By the end of this
+    chapter you can …")."""
     paragraphs = [p.strip() for p in chapter_body.split("\n\n") if p.strip() and not p.lstrip().startswith("#")]
     if not paragraphs:
         return ""
     text = " ".join(paragraphs[0].split())
     match = re.search(r"(?<=[.!?])\s+(?=[A-Z])", text)
-    sentence = text[:match.start()] if match else text
-    return PROMISE.sub("", sentence).rstrip(".")
+    return text[:match.start()] if match else text
+
+
+def _first_sentence(chapter_body: str) -> str:
+    """The first sentence after the chapter's title, for the contents table: what the reader can do by its end."""
+    return PROMISE.sub("", first_sentence(chapter_body)).rstrip(".")
 
 
 def reader(manifest: dict, cfg: dict) -> str:

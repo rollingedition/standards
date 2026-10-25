@@ -463,26 +463,30 @@ def render_chapter(chapter: Chapter, example_html: Callable[[str], str],
                    bind: Callable[[str], str] | None = None,
                    link: Callable[[str], str | None] | None = None,
                    table_wrap: tuple[str, str] | None = None,
-                   working_rule: tuple[str, ...] = ()) -> str:
-    """HTML for a chapter's body, without its # title. Section headings get their IDs; embed
+                   working_rule: tuple[str, ...] = (),
+                   heading_after: Callable[[Section], str] = lambda s: "") -> str:
+    """HTML for a chapter's body, without its # title. Section headings get their IDs; heading_extra's HTML goes
+    inside a section's heading, and heading_after's right after it, so a heading can stay its title alone; embed
     paragraphs become whatever example_html returns; fenced code goes through code_block(code, language);
     bind (usually Book.bind) fills in output and version bindings first; link turns the ID in an
     internal link, [text](#any-id), into the href to use, so a link can reach another chapter; table_wrap is
-    the HTML to open before each table and close after it. A paragraph that opens with one of the working_rule
+    the HTML to open before each table and close after it. Inline code carries translate="no", so a browser's
+    translation leaves it as it is. A paragraph that opens with one of the working_rule
     labels in bold, as "**Working rule:**", gets class "working-rule", and its label class "working-rule-label"
     with the colon kept for screen readers only."""
     md = new_markdown()
     if code_block is not None:
         md.options["highlight"] = lambda content, lang, attrs: code_block(content, lang)
     tokens = md.parse(bind(chapter.body) if bind else chapter.body)
-    if link is not None:
-        for tok in tokens:
-            for child in tok.children or []:
-                href = child.attrGet("href") if child.type == "link_open" else None
-                if href and href.startswith("#") and len(href) > 1:
-                    target = link(href[1:])
-                    if target:
-                        child.attrSet("href", target)
+    for tok in tokens:
+        for child in tok.children or []:
+            if child.type == "code_inline":
+                child.attrSet("translate", "no")       # a browser's translation leaves code as it is
+            href = child.attrGet("href") if link is not None and child.type == "link_open" else None
+            if href and href.startswith("#") and len(href) > 1:
+                target = link(href[1:])
+                if target:
+                    child.attrSet("href", target)
     by_line = {s.line - chapter.body_offset - 1: s for s in chapter.sections}
     out: list[Token] = []
     i = 0
@@ -506,6 +510,11 @@ def render_chapter(chapter: Chapter, example_html: Callable[[str], str],
                     raw.content = extra
                     inline.children = (inline.children or []) + [raw]
                 out.append(tokens[i + 2])
+                after = heading_after(section)
+                if after:
+                    block = Token("html_block", "", 0)
+                    block.content = after + "\n"
+                    out.append(block)
                 i += 3
                 continue
         eid = _embed_id(tokens, i)

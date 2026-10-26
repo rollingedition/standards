@@ -130,3 +130,43 @@ def test_slugify_suggests_ids():
     assert bookfmt.slugify("Why position matters!") == "why-position-matters"
     assert bookfmt.slugify("Café & ML 2.0") == "cafe-ml-2-0"
     assert len(bookfmt.slugify("word " * 40)) <= 64
+
+
+BOUND = CHAPTER.replace("Opening text.", "Opening text, on pandas {{version:pandas}}.") \
+               .replace("Read the file.", "Read the file: it has {{out:hello:rows}} rows.")
+
+
+def bound_book(root, rows="3", pandas="2.2.2", chapter=BOUND):
+    make_book(root, chapter=chapter, examples={"hello": ('print("rows: 3")\n', f"rows: {rows}\n")})
+    (root / "examples" / "requirements.txt").write_text(f"pandas=={pandas}\n")
+    return bookfmt.load_book(root)
+
+
+def test_a_unit_without_bindings_has_the_same_hash_both_ways(tmp_path):
+    book = bookfmt.load_book(make_book(tmp_path))
+    rendered = book.rendered_hashes()
+    assert rendered == {"first-steps": book.chapters[0].sha256, **{s.section_id: s.sha256 for s in book.sections}}
+    # the same normalization for both: the source's hash is the text's hash function applied to the source
+    assert all(bookfmt.text_sha256(s.source) == s.sha256 for s in book.sections)
+    assert bookfmt.text_sha256(book.chapters[0].opening) == book.chapters[0].sha256
+    assert book.unit_source("load-data").startswith("## Load the data\n") and "{#load-data}" not in book.unit_source("load-data")
+    assert book.unit_source("first-steps").splitlines()[1] == "# First steps" and book.unit_source("nope") is None
+
+
+def test_the_rendered_hash_covers_the_text_as_read_with_bindings_filled_in(tmp_path):
+    a = bound_book(tmp_path / "a")
+    b = bound_book(tmp_path / "b", rows="4")                     # an example's output moved; the source didn't
+    c = bound_book(tmp_path / "c", pandas="2.3.0")               # a pin moved
+    ra, rb, rc = a.rendered_hashes(), b.rendered_hashes(), c.rendered_hashes()
+    assert [s.sha256 for s in a.sections] == [s.sha256 for s in b.sections] == [s.sha256 for s in c.sections]
+    assert a.chapters[0].sha256 == b.chapters[0].sha256 == c.chapters[0].sha256
+    assert ra["load-data"] != rb["load-data"] and ra["first-steps"] == rb["first-steps"]
+    assert ra["first-steps"] != rc["first-steps"] and ra["load-data"] == rc["load-data"]
+    assert ra["summarize"] == a.sections[2].sha256 == rb["summarize"] == rc["summarize"]   # no binding: one hash
+    assert ra["load-data"] == bookfmt.text_sha256(a.bind(a.unit_source("load-data")))
+    assert ra["load-data"] != a.sections[0].sha256              # the source still holds the binding
+    # the text as read with a typed number is the text as read with a binding that gives it
+    typed = bound_book(tmp_path / "d", chapter=BOUND.replace("{{out:hello:rows}}", "3"))
+    assert typed.sections[0].sha256 != a.sections[0].sha256 and typed.rendered_hashes()["load-data"] == ra["load-data"]
+    assert a.bound_values(a.unit_source("load-data")) == {("out", "hello:rows"): "3"}
+    assert c.bound_values(c.unit_source("first-steps")) == {("version", "pandas"): "2.3.0"}

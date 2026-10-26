@@ -68,6 +68,12 @@ def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def text_sha256(text: str) -> str:
+    """The hash of a unit's text, normalized as a section's hash is: the same function for the source and for the text
+    as read, so a unit with no binding has the same hash both ways."""
+    return sha256_text(normalize_text(text.split("\n")))
+
+
 @dataclass
 class Section:
     section_id: str
@@ -79,6 +85,7 @@ class Section:
     line: int                   # 1-based line of the heading in the chapter file
     sha256: str
     example_ids: list[str] = field(default_factory=list)
+    source: str = field(default="", repr=False)    # the text its sha256 covers, before normalizing: heading to next heading
 
 
 @dataclass
@@ -100,6 +107,7 @@ class Chapter:
     sha256: str                 # hash of the opening text: the title and everything before the first section
     sections: list[Section] = field(default_factory=list)
     embeds: list[Embed] = field(default_factory=list)
+    opening: str = field(default="", repr=False)   # the opening text its sha256 covers, before normalizing
 
 
 @dataclass
@@ -198,6 +206,39 @@ class Book:
     def bind(self, text: str) -> str:
         """The text with every binding filled in. Unresolved bindings stay visible; binding_problems reports them."""
         return BINDING.sub(lambda m: self.binding_value(m.group(1), m.group(2))[0] or m.group(0), text)
+
+    def unit_source(self, unit: str) -> str | None:
+        """A unit's source text, the text its sha256 covers before normalizing: a chapter's opening, under the chapter's
+        ID (its title and everything before its first section), or a section, its heading without the {#id} to the next
+        heading. None when the book has no such unit."""
+        for c in self.chapters:
+            if c.chapter_id == unit:
+                return c.opening
+            for s in c.sections:
+                if s.section_id == unit:
+                    return s.source
+        return None
+
+    def bound_values(self, text: str) -> dict[tuple[str, str], str | None]:
+        """Each binding in a text, (kind, reference) as written, with the value this book fills in (None when it doesn't
+        resolve)."""
+        return {(m.group(1), m.group(2)): self.binding_value(m.group(1), m.group(2))[0] for m in BINDING.finditer(text)}
+
+    def rendered_sha256(self, text: str) -> str:
+        """The hash of a unit's text as read: normalized as its sha256 is, after bind fills in every binding with this
+        book's recorded outputs and pins. A text with no binding hashes the same both ways."""
+        return text_sha256(self.bind(text) if BINDING.search(text) else text)
+
+    def rendered_hashes(self) -> dict[str, str]:
+        """Every unit's rendered_sha256, by ID: each chapter's opening under the chapter's ID, then its sections. A
+        section's sha256 covers its source, where a number an example prints is still a binding; this covers the text a
+        reader reads, so a library update that moves that number changes it. Both go into sections.json."""
+        out: dict[str, str] = {}
+        for c in self.chapters:
+            out[c.chapter_id] = c.sha256 if not BINDING.search(c.opening) else self.rendered_sha256(c.opening)
+            for s in c.sections:
+                out[s.section_id] = s.sha256 if not BINDING.search(s.source) else self.rendered_sha256(s.source)
+        return out
 
     def binding_problems(self) -> list[str]:
         problems = []
@@ -327,13 +368,13 @@ def parse_chapter(path: Path, rel: str, order: int, first_section_order: int, md
         sections.append(Section(
             section_id=hid, chapter_id=chapter_id, title=text_, level=level,
             parent_id=parent if level == 3 else None, order=first_section_order + len(sections),
-            line=line + offset + 1, sha256=sha256_text(normalize_text(section_lines)),
+            line=line + offset + 1, sha256=sha256_text(normalize_text(section_lines)), source="\n".join(section_lines),
         ))
 
     first_section_line = next((h[1] for h in headings if h[0] in SECTION_LEVELS), len(lines))
     intro = lines[:first_section_line]
     chapter = Chapter(chapter_id=chapter_id, title=title, file=rel, order=order, body=body, body_offset=offset,
-                      sha256=sha256_text(normalize_text(intro)), sections=sections)
+                      sha256=sha256_text(normalize_text(intro)), sections=sections, opening="\n".join(intro))
     for start, end, eid in embeds:
         owner = None
         for s in sections:

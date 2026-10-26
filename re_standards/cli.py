@@ -6,12 +6,13 @@ Book repos call these through the reusable workflows in .github/workflows/. Each
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
 from pathlib import Path
 
-from . import bookfmt, catalog, checks, community, data_path, examples, readme, style
+from . import bookfmt, catalog, checks, community, data_path, examples, readme, resolve, style
 
 
 def report(name: str, problems: list[str], ok_line: str) -> int:
@@ -78,6 +79,29 @@ def cmd_kind_label(args) -> int:
     return report("Kind label", problems, "kind labels: " + ", ".join(x for x in labels if x.startswith("kind:")))
 
 
+def workflow_command(level: str, title: str, message: str) -> None:
+    """An annotation on the check, in GitHub Actions' workflow-command syntax, when a workflow runner runs this (GitHub
+    sets GITHUB_ACTIONS, and so does the platform's local runner). Elsewhere, nothing."""
+    if "GITHUB_ACTIONS" not in os.environ:
+        return
+    data = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    prop = title.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A").replace(":", "%3A").replace(",", "%2C")
+    print(f"::{level} title={prop}::{data}", flush=True)
+
+
+def write_report(args, data: dict) -> None:
+    if args.report:
+        Path(args.report).write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
+
+
+def runtime_or_none(book) -> dict:
+    try:
+        rt = examples.read_runtime(book.root)
+    except examples.ExamplesError:
+        return {}
+    return {"python": rt.python, "key": rt.key, "requirements_sha256": hashlib.sha256(rt.requirements.encode()).hexdigest()}
+
+
 def cmd_examples(args) -> int:
     book = bookfmt.load_book(Path(args.book))
     backend = examples.backend_named(args.backend or os.environ.get("RE_EXAMPLES_BACKEND", "container"),
@@ -85,7 +109,17 @@ def cmd_examples(args) -> int:
     try:
         results, runtime = examples.run_examples(book, backend, timeout=args.timeout,
                                                  only=args.only.split(",") if args.only else None)
+    except examples.UnsatisfiablePins as e:
+        # Nothing was built and no example ran: a resolver's verdict, never an example's failure.
+        found = e.resolution
+        workflow_command("error", resolve.settings()["annotation"], found.explanation)
+        write_report(args, {"outcome": "unsatisfiable", "resolver": found.as_json(), "runtime": runtime_or_none(book),
+                            "passing": 0, "total": len(book.examples), "examples": []})
+        detail = "\n".join("      " + line for line in found.message.splitlines())
+        return report("Examples", [f"{found.explanation}\n    The resolver ({found.tool}) says:\n{detail}"], "")
     except examples.ExamplesError as e:
+        write_report(args, {"outcome": "error", "error": str(e), "runtime": runtime_or_none(book),
+                            "passing": 0, "total": len(book.examples), "examples": []})
         return report("Examples", [str(e)], "")
     problems = []
     for r in results:
@@ -100,8 +134,8 @@ def cmd_examples(args) -> int:
             problems.append(f"{r.example_id} fails on {label}:\n" + "\n".join("      " + x for x in detail.splitlines()))
     if not args.record:
         problems += book.output_problems
-    if args.report:
-        Path(args.report).write_text(json.dumps(examples.results_json(results, runtime), indent=1) + "\n", encoding="utf-8")
+    outcome = "recorded" if args.record else ("passed" if not problems else "failed")
+    write_report(args, examples.results_json(results, runtime, outcome))
     passing = sum(r.passing for r in results)
     where = f"Python {runtime['python']}, {runtime['backend']} runtime"
     return report("Examples", problems, f"{passing} of {len(results)} examples pass ({where})" if not args.record

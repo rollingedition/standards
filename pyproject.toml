@@ -7,7 +7,8 @@ name = "re-standards"
 version = "0.1.0"
 description = "Rolling Edition standards: book checks, the catalog taxonomy and the reference tape encoder"
 requires-python = ">=3.11"
-dependencies = ["markdown-it-py", "pyyaml"]
+# uv reads the pins before the examples' runtime is built (re_standards/resolve.py), and packaging compares versions.
+dependencies = ["markdown-it-py", "pyyaml", "packaging==26.3", "uv==0.13.1"]
 
 [project.scripts]
 re-check = "re_standards.cli:main"

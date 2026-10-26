@@ -14,6 +14,10 @@ Backends build that runtime differently:
                RE_EXAMPLES_REGISTRY set, pulled from that registry, or built and pushed there once
     host       tests only: the current interpreter, nothing installed
 
+Before a backend that installs the pins builds the runtime, a resolver reads them (resolve.py). Pins that can't be
+installed together stop the run with UnsatisfiablePins, which names the conflict in plain words, so it's never
+reported as an example's failure or as a build's last lines.
+
 Each example runs in a scratch copy of examples/, so it can't change the repo and its output never
 contains repository paths. Only stdout is compared, after trimming trailing spaces and blank lines.
 """
@@ -32,6 +36,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from . import resolve
 from .bookfmt import Book
 
 HARNESS = Path(__file__).with_name("harness.py")
@@ -41,6 +46,14 @@ PIN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s;#]+)")
 
 class ExamplesError(RuntimeError):
     """The pinned runtime is missing, unpinned or can't be built."""
+
+
+class UnsatisfiablePins(ExamplesError):
+    """The resolver says the pins can't be installed together: the runtime wasn't built and no example ran."""
+
+    def __init__(self, resolution: resolve.Resolution):
+        self.resolution = resolution
+        super().__init__(resolution.explanation)
 
 
 @dataclass
@@ -134,6 +147,11 @@ def can_block_network() -> bool:
 
 class Backend:
     name = "base"
+    installs = True                 # builds the runtime from the pins, so the resolver reads them first
+
+    def ready(self, runtime: Runtime) -> bool:
+        """Whether this runtime is already built here: then its pins installed together, and needn't be read again."""
+        return False
 
     def prepare(self, runtime: Runtime) -> None:
         pass
@@ -179,6 +197,9 @@ class VenvBackend(Backend):
     def env_dir(self, runtime: Runtime) -> Path:
         return env_root() / f"py{runtime.python}-{runtime.key}"
 
+    def ready(self, runtime: Runtime) -> bool:
+        return (self.env_dir(runtime) / ".ready").exists()
+
     def prepare(self, runtime: Runtime) -> None:
         target = self.env_dir(runtime)
         if (target / ".ready").exists():
@@ -215,6 +236,7 @@ class VenvBackend(Backend):
 class HostBackend(Backend):
     """Tests only: the current interpreter, so tiny examples run without installing anything."""
     name = "host"
+    installs = False
 
     def command(self, runtime: Runtime, workdir: Path, example: str) -> tuple[list[str], dict]:
         return [sys.executable, "-I", ".re_harness.py", example], \
@@ -272,7 +294,7 @@ class ContainerBackend(Backend):
             (Path(tmp) / "requirements.txt").write_text(runtime.requirements)
             r = subprocess.run(self.build_command(runtime, Path(tmp)), capture_output=True, text=True)
             if r.returncode != 0:
-                raise ExamplesError(f"could not build the example image: {r.stderr.strip()[-2000:]}")
+                raise ExamplesError(f"could not build the example image: {build_failure(r.stderr)}")
         if self.registry:
             r = subprocess.run(self.push_command(runtime), capture_output=True, text=True)
             if r.returncode != 0:
@@ -291,6 +313,22 @@ class ContainerBackend(Backend):
         return dict(super().describe(runtime), image=self.tag(runtime), network="none")
 
 
+def build_failure(stderr: str) -> str:
+    """Why an image didn't build. The build's last lines name only the Dockerfile's step, so pip's own errors from the
+    step that failed come first: "ERROR: Cannot install ...", and what it says the conflict is caused by."""
+    lines = [re.sub(r"^\s*(?:#\d+ )?\d+\.\d+ ", "", line).rstrip() for line in stderr.splitlines()]   # BuildKit's step and time
+    pip, keep = [], False
+    for line in lines:
+        if re.match(r"^(ERROR|error):", line) and "failed to solve" not in line:
+            keep = True
+        if keep and line.strip() and not line.startswith(("--------", "Dockerfile:")):
+            pip.append(line.strip())
+        if keep and not line.strip():
+            keep = False
+    tail = stderr.strip()[-1200:]
+    return ("\n".join(pip[:30]) + "\n" + tail) if pip else stderr.strip()[-2000:]
+
+
 def backend_named(name: str, block_network: bool = True) -> Backend:
     if name == "venv":
         return VenvBackend(block_network)
@@ -304,8 +342,19 @@ def backend_named(name: str, block_network: bool = True) -> Backend:
 # ---------------------------------------------------------------- running
 
 
+def check_pins(runtime: Runtime, backend: Backend) -> resolve.Resolution | None:
+    """The resolver's reading of the pins, when this backend is about to install them; None when it isn't."""
+    if not backend.installs or not runtime.pins() or backend.ready(runtime):
+        return None
+    found = resolve.check(runtime.python, runtime.requirements, runtime.pins())
+    if found.outcome == "unsatisfiable":
+        raise UnsatisfiablePins(found)
+    return found
+
+
 def run_examples(book: Book, backend: Backend, timeout: float = 120, only: list[str] | None = None) -> tuple[list[ExampleResult], dict]:
     runtime = read_runtime(book.root)
+    check_pins(runtime, backend)
     backend.prepare(runtime)
     results = []
     for eid in sorted(book.examples):
@@ -340,8 +389,12 @@ def run_one(book: Book, eid: str, runtime: Runtime, backend: Backend, timeout: f
                          direct=report.get("direct", []), seconds=seconds)
 
 
-def results_json(results: list[ExampleResult], runtime: dict) -> dict:
-    return {"runtime": runtime, "passing": sum(r.passing for r in results), "total": len(results),
+def results_json(results: list[ExampleResult], runtime: dict, outcome: str | None = None) -> dict:
+    """The report: each example's result. With `outcome`, the check's verdict too: passed, failed (an example ran and
+    didn't match), unsatisfiable (the pins can't be installed together, so nothing ran) or error (the runtime couldn't
+    be built for another reason)."""
+    out = {"outcome": outcome} if outcome else {}
+    return {**out, "runtime": runtime, "passing": sum(r.passing for r in results), "total": len(results),
             "examples": [asdict(r) for r in results]}
 
 

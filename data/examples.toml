@@ -1,0 +1,13 @@
+# How the examples check reads a book's pins before it builds the runtime the examples run in.
+#
+# A resolver reads the package index's metadata for every pin and says whether they can be installed together. When
+# they can't, the check reports the conflict the resolver names, in plain words, instead of a failed build: an update
+# that one pin needs and another pin forbids is a different problem from an example that prints something new.
+[resolver]
+# The runtime's platform: the image is python:{version}-slim on x86-64, whose C library is glibc 2.36 or later, so a
+# wheel built for manylinux_2_36 or older installs there.
+python_platform = "x86_64-manylinux_2_36"
+# The title of the check's annotation on GitHub when the pins can't be installed together. The platform's pull-request
+# job reads it to tell this outcome from a failing example.
+annotation = "The pins can't be installed together"
+timeout_seconds = 180

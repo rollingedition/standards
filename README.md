@@ -13,6 +13,7 @@ How a Rolling Edition book gets verified, in the open. This is the public, read-
 | `re_standards/catalog.py` | Validates the taxonomy and `book.toml`, and builds the catalog |
 | `re_standards/bookfmt.py`, `sections.py` | The book format: chapters, sections, examples and their frozen IDs, and `sections.json` |
 | `re_standards/examples.py`, `harness.py`, `runtime/Dockerfile` | Runs every example in its pinned runtime and compares its output |
+| `re_standards/resolve.py`, `data/examples.toml` | Before the runtime is built, reads the pins with a resolver (uv, pinned with this package) for that runtime's Python and platform. Pins that can't be installed together fail the examples check in plain words, naming the conflict, as their own outcome, `unsatisfiable`: in the `--report` JSON, with the resolver's message, and as an annotation on the check run. No example runs then, so it's never mistaken for an example's failure |
 | `writing/` | The writing standards every book follows: rules with IDs, reasons and checks, and annotated exemplars |
 | `data/writing.toml` | Limits and word lists for `re-check style`, the lint half of the writing standards |
 | `data/drafting.toml` | The model bar: the models books may be drafted with. Open models are for recorded outputs only (W-48) |
@@ -22,7 +23,8 @@ Run the checks on a book checkout with `re-check`:
 
 ```sh
 pip install -e .                       # from this folder
-re-check examples --book path/to/book  # every example, in its pinned runtime (--backend venv locally)
+re-check examples --book path/to/book  # every example, in its pinned runtime (--backend venv locally); --report FILE writes
+                                       # the outcome (passed, failed, unsatisfiable or error) and each example's result
 re-check manifest --book path/to/book
 re-check section-ids --book path/to/book --base-ref <base commit> --previous latest
 re-check kind-label --labels kind:deps

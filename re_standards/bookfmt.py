@@ -203,9 +203,11 @@ class Book:
                           f"{label!r}; print exactly one \"{label}: value\" line")
         return hits[0], None
 
-    def bind(self, text: str) -> str:
-        """The text with every binding filled in. Unresolved bindings stay visible; binding_problems reports them."""
-        return BINDING.sub(lambda m: self.binding_value(m.group(1), m.group(2))[0] or m.group(0), text)
+    def bind(self, text: str, keep: tuple[str, ...] = ()) -> str:
+        """The text with every binding filled in, but those of the kinds in `keep`, which stay as written. Unresolved
+        bindings stay visible; binding_problems reports them."""
+        return BINDING.sub(lambda m: m.group(0) if m.group(1) in keep else
+                           (self.binding_value(m.group(1), m.group(2))[0] or m.group(0)), text)
 
     def unit_source(self, unit: str) -> str | None:
         """A unit's source text, the text its sha256 covers before normalizing: a chapter's opening, under the chapter's
@@ -238,6 +240,23 @@ class Book:
             out[c.chapter_id] = c.sha256 if not BINDING.search(c.opening) else self.rendered_sha256(c.opening)
             for s in c.sections:
                 out[s.section_id] = s.sha256 if not BINDING.search(s.source) else self.rendered_sha256(s.source)
+        return out
+
+    def content_sha256(self, text: str) -> str:
+        """The hash of a unit's content: its text as read, but with each version binding left as written, so a library's
+        version number moving alone doesn't change it while a number an example prints does. Normalized as its sha256
+        is; a text with no binding hashes the same as its source, and one with only version bindings the same as its
+        source too."""
+        return text_sha256(self.bind(text, keep=("version",)) if BINDING.search(text) else text)
+
+    def content_hashes(self) -> dict[str, str]:
+        """Every unit's content_sha256, by ID, as rendered_hashes: what tells a change worth a returning reader's
+        attention from a version number that alone moved."""
+        out: dict[str, str] = {}
+        for c in self.chapters:
+            out[c.chapter_id] = c.sha256 if not BINDING.search(c.opening) else self.content_sha256(c.opening)
+            for s in c.sections:
+                out[s.section_id] = s.sha256 if not BINDING.search(s.source) else self.content_sha256(s.source)
         return out
 
     def binding_problems(self) -> list[str]:

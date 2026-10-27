@@ -1,18 +1,22 @@
 """The section manifest, `sections.json`: one per edition, written by the release job.
 
-Per section, as the spec lists: section_id, chapter_id, title, order, sha256, rendered_sha256, changed and example_ids,
-plus level and parent_id. Top-level chapters, examples and redirects arrays carry the rest of what
+Per section, as the spec lists: section_id, chapter_id, title, order, sha256, rendered_sha256, content_sha256, changed
+and example_ids, plus level and parent_id. Top-level chapters, examples and redirects arrays carry the rest of what
 "what changed" lists, permanent links and the assistant server need.
 
-Two hashes per chapter opening and section. `sha256` covers the source text, where a number an example prints is still
-a binding such as {{out:EXAMPLE_ID:LABEL}}; it names a version of the source, so checks and highlights are keyed by it.
-`rendered_sha256` covers the text as read, after Book.bind fills in each binding with this edition's recorded outputs
-and pins, normalized the same way, so it equals `sha256` for a unit with no binding. `changed` compares the text as
-read: a library update that moves a bound number changes the section, and a binding put in place of the same typed
-number doesn't.
+Three hashes per chapter opening and section, each of its text normalized the same way:
+- `sha256` covers the source text, where a number an example prints is still a binding such as
+  {{out:EXAMPLE_ID:LABEL}}; it names a version of the source, so checks and highlights are keyed by it.
+- `rendered_sha256` covers the text as read, after Book.bind fills in each binding with this edition's recorded outputs
+  and pins. `changed` compares it: a library update that moves a bound number changes the section, and a binding put
+  in place of the same typed number doesn't.
+- `content_sha256` covers the text as read but with each version binding, {{version:PACKAGE}}, left as written. A
+  section whose text as read changed while this didn't changed only in a library's version number: still a change,
+  but a quiet one, which nothing asks a returning reader to read again.
+A unit with no binding has the same hash all three ways.
 
-Schema 2 adds `rendered_sha256`, and `changed` follows it. A manifest written before (schema 1) has no
-`rendered_sha256`: `fill_rendered` works it out from that edition's own text, and compare `changed` with it.
+Schema 2 added `rendered_sha256`, and `changed` follows it; schema 3 adds `content_sha256`. A manifest written before
+lacks them: `fill_hashes` works them out from that edition's own text.
 """
 from __future__ import annotations
 
@@ -21,7 +25,7 @@ from pathlib import Path
 
 from .bookfmt import Book
 
-SCHEMA_VERSION = 2              # 2: rendered_sha256 on every chapter and section, which `changed` compares
+SCHEMA_VERSION = 3              # 2: rendered_sha256, which `changed` compares; 3: content_sha256
 
 
 def text_hash(entry: dict) -> str:
@@ -30,17 +34,30 @@ def text_hash(entry: dict) -> str:
     return entry.get("rendered_sha256") or entry["sha256"]
 
 
+def content_hash(entry: dict) -> str:
+    """A manifest entry's hash of its content, versions left as written: its content_sha256, or without one its hash of
+    the text as read (text_hash), so a change in a version number alone counts as a change of content rather than
+    going unseen."""
+    return entry.get("content_sha256") or text_hash(entry)
+
+
+def content_changed(old: dict | None, new: dict) -> bool:
+    """Whether a unit's content changed from one edition's manifest entry to another's: its text as read changed, and not
+    only in a version number. A unit the old edition didn't have is new content."""
+    return old is None or (text_hash(old) != text_hash(new) and content_hash(old) != content_hash(new))
+
+
 def build_manifest(book: Book, edition: str, line: str, prev: dict | None,
                    example_results: dict[str, dict] | None = None) -> dict:
     """`prev` is the previous edition's manifest on the same line, or None for a line's first edition. A previous
-    manifest written before rendered_sha256 should be filled in first (fill_rendered), so a change in a bound value
+    manifest written before rendered_sha256 should be filled in first (fill_hashes), so a change in a bound value
     alone is seen.
 
     example_results maps example_id -> {"passing": bool, "versions": {...}, "direct": [...]}, from the
     release run of every example.
     """
     results = example_results or {}
-    rendered = book.rendered_hashes()
+    rendered, content = book.rendered_hashes(), book.content_hashes()
     prev_sections = {s["section_id"]: s for s in (prev or {}).get("sections", [])}
     prev_chapters = {c["chapter_id"]: c for c in (prev or {}).get("chapters", [])}
     prev_examples = {e["example_id"]: e for e in (prev or {}).get("examples", [])}
@@ -53,12 +70,13 @@ def build_manifest(book: Book, edition: str, line: str, prev: dict | None,
 
     chapters = [{
         "chapter_id": c.chapter_id, "title": c.title, "order": c.order, "file": c.file,
-        "sha256": c.sha256, "rendered_sha256": rendered[c.chapter_id],
+        "sha256": c.sha256, "rendered_sha256": rendered[c.chapter_id], "content_sha256": content[c.chapter_id],
         "changed": prev is None or changed(prev_chapters.get(c.chapter_id), c.sha256, c.chapter_id),
     } for c in book.chapters]
     sections = [{
         "section_id": s.section_id, "chapter_id": s.chapter_id, "title": s.title, "order": s.order,
         "level": s.level, "parent_id": s.parent_id, "sha256": s.sha256, "rendered_sha256": rendered[s.section_id],
+        "content_sha256": content[s.section_id],
         "changed": prev is None or changed(prev_sections.get(s.section_id), s.sha256, s.section_id),
         "example_ids": list(s.example_ids),
     } for s in book.sections]
@@ -107,21 +125,30 @@ def units_changed(manifest: dict) -> list[str]:
     return out
 
 
-def fill_rendered(manifest: dict, book: Book) -> dict:
-    """A manifest written before rendered_sha256 (schema 1), with each chapter's and section's rendered_sha256 worked
-    out from `book`, the same edition's text: its chapters, its examples' recorded outputs and its pins, as its bundle
-    keeps them. Nothing else changes, and the manifest given is left as it is. A unit is filled in only when the book's
-    own sha256 for it is the manifest's, so a text that isn't the edition's never gives it a hash; an entry that already
-    has one keeps it."""
-    rendered, source = book.rendered_hashes(), {c.chapter_id: c.sha256 for c in book.chapters}
+HASHES = ("rendered_sha256", "content_sha256")     # what a manifest written before them lacks
+
+
+def fill_hashes(manifest: dict, book: Book) -> dict:
+    """A manifest written before rendered_sha256 or content_sha256 (schema 1 or 2), with each chapter's and section's
+    missing hashes worked out from `book`, the same edition's text: its chapters, its examples' recorded outputs and its
+    pins, as its bundle keeps them. Nothing else changes, and the manifest given is left as it is. A unit is filled in only
+    when the book's own sha256 for it is the manifest's, so a text that isn't the edition's never gives it a hash; a hash
+    an entry already has stays."""
+    worked = {"rendered_sha256": book.rendered_hashes(), "content_sha256": book.content_hashes()}
+    source = {c.chapter_id: c.sha256 for c in book.chapters}
     source.update({s.section_id: s.sha256 for s in book.sections})
 
     def fill(entry: dict, unit: str) -> dict:
-        if "rendered_sha256" in entry or source.get(unit) != entry["sha256"]:
+        if source.get(unit) != entry["sha256"]:
             return entry
-        return dict(entry, rendered_sha256=rendered[unit])
+        return dict(entry, **{k: worked[k][unit] for k in HASHES if k not in entry})
     return dict(manifest, chapters=[fill(c, c["chapter_id"]) for c in manifest.get("chapters", [])],
                 sections=[fill(s, s["section_id"]) for s in manifest.get("sections", [])])
+
+
+def has_hashes(manifest: dict) -> bool:
+    """Whether every chapter and section of a manifest has each hash schema 3 writes."""
+    return all(k in u for u in manifest.get("chapters", []) + manifest.get("sections", []) for k in HASHES)
 
 
 def manifest_ids(manifest: dict) -> set[str]:

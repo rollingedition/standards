@@ -47,8 +47,8 @@ from test_bookfmt import BOUND, bound_book  # noqa: E402
 
 def test_a_bound_value_that_moves_changes_the_section_and_its_hash_of_the_text_as_read(tmp_path):
     first = sections.build_manifest(bound_book(tmp_path / "a"), "2026.10.1", "main", None, RESULTS)
-    assert first["schema_version"] == 2
-    assert all("rendered_sha256" in u for u in first["chapters"] + first["sections"])
+    assert first["schema_version"] == 3 and sections.has_hashes(first)
+    assert all("rendered_sha256" in u and "content_sha256" in u for u in first["chapters"] + first["sections"])
     moved = sections.build_manifest(bound_book(tmp_path / "b", rows="4"), "2026.10.2", "main", first, RESULTS)
     by = {s["section_id"]: s for s in moved["sections"]}
     assert by["load-data"]["sha256"] == first["sections"][0]["sha256"]          # the source's hash: unchanged
@@ -69,23 +69,45 @@ def test_a_binding_that_gives_the_typed_value_changes_nothing_a_reader_sees(tmp_
     assert sections.units_changed(m) == []
 
 
-def test_a_manifest_written_before_the_hash_is_filled_in_from_its_own_text(tmp_path):
+def test_a_manifest_written_before_the_hashes_is_filled_in_from_its_own_text(tmp_path):
     book = bound_book(tmp_path / "a")
     full = sections.build_manifest(book, "2026.10.1", "main", None, RESULTS)
-    old = {**full, "schema_version": 1,
-           "chapters": [{k: v for k, v in c.items() if k != "rendered_sha256"} for c in full["chapters"]],
-           "sections": [{k: v for k, v in s.items() if k != "rendered_sha256"} for s in full["sections"]]}
+    drop = lambda m, keys: {**m, "chapters": [{k: v for k, v in c.items() if k not in keys} for c in m["chapters"]],    # noqa: E731
+                             "sections": [{k: v for k, v in x.items() if k not in keys} for x in m["sections"]]}
+    old = {**drop(full, sections.HASHES), "schema_version": 1}
+    two = {**drop(full, ("content_sha256",)), "schema_version": 2}
     before = json.dumps(old, sort_keys=True)
-    assert sections.fill_rendered(old, book) == {**full, "schema_version": 1}
+    assert not sections.has_hashes(old) and not sections.has_hashes(two)
+    assert sections.fill_hashes(old, book) == {**full, "schema_version": 1}
+    assert sections.fill_hashes(two, book) == {**full, "schema_version": 2}      # schema 2: only content_sha256 missing
     assert json.dumps(old, sort_keys=True) == before                             # the manifest given is left as it is
     # without the hash, a change is decided by sha256: a moved bound value isn't seen, nothing is invented
     moved = sections.build_manifest(bound_book(tmp_path / "b", rows="4"), "2026.10.2", "main", old, RESULTS)
     assert sections.units_changed(moved) == []
     filled = sections.build_manifest(bound_book(tmp_path / "c", rows="4"), "2026.10.2", "main",
-                                     sections.fill_rendered(old, book), RESULTS)
+                                     sections.fill_hashes(old, book), RESULTS)
     assert sections.units_changed(filled) == ["load-data"]
     # a text that isn't the edition's (its source hash differs) never gives a unit its hash
     other = bound_book(tmp_path / "d", chapter=BOUND.replace("Read the file", "Open the file"))
-    partial = sections.fill_rendered(old, other)
+    partial = sections.fill_hashes(old, other)
     assert "rendered_sha256" not in partial["sections"][0] and "rendered_sha256" in partial["sections"][1]
     assert sections.text_hash(partial["sections"][0]) == old["sections"][0]["sha256"]
+    assert sections.content_hash(partial["sections"][0]) == old["sections"][0]["sha256"]
+
+
+def test_a_version_number_alone_changes_the_text_but_not_its_content(tmp_path):
+    """A pin the text names moves: the text as read changed (`changed`), its content didn't, so the change is a quiet
+    one. An output that moves changes both."""
+    first = sections.build_manifest(bound_book(tmp_path / "a"), "2026.10.1", "main", None, RESULTS)
+    pinned = sections.build_manifest(bound_book(tmp_path / "b", pandas="2.3.0"), "2026.10.2", "main", first, RESULTS)
+    a, b = first["chapters"][0], pinned["chapters"][0]                           # the opening names pandas's version
+    assert b["changed"] and a["content_sha256"] == b["content_sha256"] and a["rendered_sha256"] != b["rendered_sha256"]
+    assert a["content_sha256"] == a["sha256"]                                    # only a version binding: its source
+    assert not sections.content_changed(a, b)
+    moved = sections.build_manifest(bound_book(tmp_path / "c", rows="4"), "2026.10.2", "main", first, RESULTS)
+    assert sections.content_changed(first["sections"][0], moved["sections"][0])
+    assert not sections.content_changed(first["sections"][1], moved["sections"][1])   # nothing changed in it
+    assert sections.content_changed(None, moved["sections"][1])                  # a unit the old edition hadn't is new
+    # a manifest without content hashes falls back to the text as read: a version number counts as content then
+    bare = lambda e: {k: v for k, v in e.items() if k != "content_sha256"}       # noqa: E731
+    assert sections.content_changed(bare(a), bare(b))

@@ -170,3 +170,16 @@ def test_the_rendered_hash_covers_the_text_as_read_with_bindings_filled_in(tmp_p
     assert typed.sections[0].sha256 != a.sections[0].sha256 and typed.rendered_hashes()["load-data"] == ra["load-data"]
     assert a.bound_values(a.unit_source("load-data")) == {("out", "hello:rows"): "3"}
     assert c.bound_values(c.unit_source("first-steps")) == {("version", "pandas"): "2.3.0"}
+
+
+def test_the_content_hash_leaves_version_numbers_as_written(tmp_path):
+    a = bound_book(tmp_path / "a")
+    b = bound_book(tmp_path / "b", pandas="2.3.0")                # only a pin moved
+    c = bound_book(tmp_path / "c", rows="4")                      # an example's output moved
+    ca, cb, cc = a.content_hashes(), b.content_hashes(), c.content_hashes()
+    assert ca["first-steps"] == cb["first-steps"] == a.chapters[0].sha256         # versions only: its source's hash
+    assert a.rendered_hashes()["first-steps"] != b.rendered_hashes()["first-steps"]
+    assert ca["load-data"] != cc["load-data"] and ca["load-data"] == cb["load-data"]
+    assert ca["summarize"] == a.sections[2].sha256                                 # no binding: one hash all three ways
+    assert a.bind("pandas {{version:pandas}}, {{out:hello:rows}} rows", keep=("version",)) == "pandas {{version:pandas}}, 3 rows"
+

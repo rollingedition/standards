@@ -1,0 +1,11 @@
+# Book manifest: how this book is cataloged. Validated against the taxonomy on every pull request.
+slug = "primer-on-search-relevance"
+title = "A Primer on Search Relevance"
+summary = "How search engines find and rank results, and how to measure whether a change helps: lexical, semantic and hybrid retrieval, reranking with learned models and LLMs, and judgments from people and LLMs, on a real product catalog."
+status = "live"                       # draft | live | unmaintained | retired
+level = "foundations"                 # foundations | in-practice
+reader = "For readers comfortable with Python, pandas and NumPy who are new to search: a data scientist or engineer asked to improve a search box, or to build retrieval for an LLM application."
+skills = ["search-relevance", "search-evaluation", "semantic-search", "learning-to-rank", "retrieval-augmented-generation"]   # 1 to 5; the first is primary
+line = "main"                         # edition line
+core_libraries = ["numpy", "pandas", "scipy", "scikit-learn", "bm25s", "faiss-cpu", "lightgbm"]   # names only; versions are pinned in examples/requirements.txt
+sponsor = ""

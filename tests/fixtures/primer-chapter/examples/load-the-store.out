@@ -1,0 +1,17 @@
+products: 12,000
+queries: 80
+train queries: 50
+test queries: 30
+judged pairs: 13,077
+pairs with conflicting labels: 7
+exact pairs: 3,252
+partial pairs: 7,972
+irrelevant pairs: 1,853
+products judged for at least one query: 11,917
+
+                               query        query_class  split
+query_id
+6                acrylic clear chair      Dining Chairs  train
+10                   king poster bed               Beds  train
+20          foutains with brick look          Wallpaper  train
+36        laundry basket with wheels  Hampers & Baskets  train

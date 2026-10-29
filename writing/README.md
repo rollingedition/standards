@@ -214,3 +214,16 @@ A reader follows a story more easily than a list of facts. These rules keep each
 
 **W-53 Tables fit a phone.** A table has at most 6 columns, short cells and a header row (W-39). For a wide comparison, put the things compared in the columns and the measures in the rows, or split it into two tables. Leave out what a sentence can say, such as whether two tests agree.
 *Why:* a wide table scrolls sideways on a phone, and the reader loses which row they're on. *Check:* lint for the column count (`re-check style`); critic for the rest.
+
+## 12. Spoken descriptions
+
+Narration reads a chapter word for word, but never its code, output or tables. Each example, fenced block and table is read as a description written for it in the book's `narration/{chapter_id}.toml`, beside the chapter, so a listener keeps what a reader sees.
+
+**W-54 Describe every example, block and table.** In a sentence or two, say what the code does and what its output shows, what a formula says, or what a table compares. Write for a listener who can't see the page: name what goes in and what comes out, never the syntax. Narration reads an example's name first ("Example: N D C G for one query."), so don't repeat it. Write "The code takes BM25's top ten for clear shower curtain, adds up each grade divided by a log discount, does the same for the best possible top ten, and prints their ratio: {{out:ndcg-for-one-query:ndcg@10}}." Not "It calls `ndcg_at_k` on the ranking and prints the result." Never write "as you can see", "below" or "on the page".
+*Why:* code read aloud is noise, and an example announced by name alone tells a listener nothing about what it found. *Check:* `re-check narration` lists a missing description, and one whose example, section or first line no longer matches; it warns, and never fails a pull request. Critic for the rest.
+
+**W-55 Bind the numbers a description quotes.** Quote an output's values with `{{out:…}}` and versions with `{{version:…}}`, as the prose does (W-25, W-26). Claim nothing the output doesn't show.
+*Why:* a description stays current from one edition to the next only through its bindings, and a listener can't check a claim against the page. *Check:* `re-check narration` lists bindings that don't resolve; critic for claims.
+
+**W-56 Say hard terms through the lexicon, never by changing the text.** When a voice can't read a term, such as BM25, nDCG@10 or a model's name, add its reading to the book's `narration/lexicon.toml`: under `[terms]` for text as written, or `[words]` for a whole word in any case, such as a word of an example's ID. Never rewrite the chapter for the voice.
+*Why:* the page and the narration say the same words, and the text is written for readers. *Check:* `re-check narration` lists every term no rule reads; critic for readings that say a term wrongly.

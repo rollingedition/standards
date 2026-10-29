@@ -1,5 +1,8 @@
 # Every book pull request needs at least one kind: label before it can merge: an edition's kinds come from these labels.
-# Runs again whenever labels change, so the triage agent's labels turn it green.
+# Runs again whenever labels change, so the triage agent's labels turn it green. A pull request that changes only the
+# book's narration files (narration/: spoken descriptions and the lexicon) needs none: the page doesn't change, so it
+# has no kind of change, and it rides with the book's next edition. The book is checked out with its history so the
+# check can list the files the pull request changes; nothing in it runs.
 name: Kind label
 
 on:
@@ -20,6 +23,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
           repository: rollingedition/standards
           ref: ${{ inputs.standards-ref }}
           path: .standards
@@ -29,5 +35,5 @@ jobs:
       - name: Install the checks
         if: ${{ !env.RE_LOCAL }}
         run: pip install --quiet -e ./.standards
-      - name: Require a kind label
-        run: re-check kind-label --event "$GITHUB_EVENT_PATH"
+      - name: Require a kind label, unless only narration files changed
+        run: re-check kind-label --event "$GITHUB_EVENT_PATH" --book .

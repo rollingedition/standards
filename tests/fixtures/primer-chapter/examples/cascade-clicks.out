@@ -1,0 +1,8 @@
+bm25 grades, ranks 1 to 10: 1 2 2 2 2 1 1 0 0 0
+bm25 clicked rank: 2
+bm25 clicked product: woolley vinyl single shower curtain
+bm25 exact products shown below the click: 3
+semantic grades, ranks 1 to 10: 2 2 1 1 2 1 2 2 1 1
+semantic clicked rank: 1
+semantic clicked product: woolley vinyl solid color single shower curtain
+semantic exact products shown below the click: 4

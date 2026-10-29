@@ -1,0 +1,15 @@
+mean judged@10: 0.927
+queries where the hand-built judged@10 equals lib.metrics: 30 of 30
+unjudged products in the top 10s: 22
+test queries with an unjudged product in the top 10: 7
+judgments for pull out sleeper loveseat: 143
+irrelevant judgments for pull out sleeper loveseat: 0
+
+                    query  judged@10  unjudged                        first unjudged product
+   outdoor light fixtures        0.2         8  60 watt equivalent e12 led candle light bulb
+     beach blue headboard        0.5         5 lemon frosting indoor/outdoor , removable cov
+pull out sleeper loveseat        0.6         4    country oxford 87.75 '' rolled arm sleeper
+    full bed with trundle        0.8         2 abel staircase twin over full bunk bed with t
+   whimsical solar lights        0.9         1 luciole 0.12-watt led solar power dusk to daw
+  bistro table and chairs        0.9         1              drayton patio 5 piece bistro set
+     wooden chair outdoor        0.9         1 osterley 31.5 '' w writing desk and chair set

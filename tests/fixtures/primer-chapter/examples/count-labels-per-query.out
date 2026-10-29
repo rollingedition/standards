@@ -1,0 +1,27 @@
+partial share of all judgments: 0.610
+median exact share: 0.207
+median irrelevant share: 0.060
+lowest exact share: 0.014
+query with the lowest exact share: 48 in entry table with side by side drawer
+highest exact share: 0.749
+query with the highest exact share: outdoor light fixtures
+highest irrelevant share: 0.776
+query with the highest irrelevant share: podium with locking cabinet
+queries with no irrelevant judgment: 9
+fewest exact products for a query: 3
+most exact products for a query: 193
+queries with fewer than 10 exact products: 23
+test queries with fewer than 10 exact products: 7
+queries with an exact share of 0.1 or less: 29
+
+exact share  queries
+0.0 to 0.1   29  #############################
+0.1 to 0.2   10  ##########
+0.2 to 0.3   12  ############
+0.3 to 0.4   11  ###########
+0.4 to 0.5    9  #########
+0.5 to 0.6    1  #
+0.6 to 0.7    7  #######
+0.7 to 0.8    1  #
+0.8 to 0.9    0
+0.9 to 1.0    0

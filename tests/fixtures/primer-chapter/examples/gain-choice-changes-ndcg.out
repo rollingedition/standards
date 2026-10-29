@@ -1,0 +1,27 @@
+partial share of the bm25 top 10: 0.403
+partial share of the semantic top 10: 0.380
+bm25, exact only: 0.519
+semantic, exact only: 0.648
+semantic minus bm25, exact only: 0.130
+permutation p, exact only: 0.000
+t-test p, exact only: 0.002
+tied queries, exact only: 3
+bm25, exact or partial: 0.903
+semantic, exact or partial: 0.983
+semantic minus bm25, exact or partial: 0.080
+permutation p, exact or partial: 0.010
+t-test p, exact or partial: 0.026
+tied queries, exact or partial: 19
+bm25, grades 2, 1, 0: 0.725
+semantic, grades 2, 1, 0: 0.830
+semantic minus bm25, grades 2, 1, 0: 0.105
+permutation p, grades 2, 1, 0: 0.001
+t-test p, grades 2, 1, 0: 0.003
+tied queries, grades 2, 1, 0: 2
+bm25, partial gain 0.1: 0.564
+semantic, partial gain 0.1: 0.688
+semantic minus bm25, partial gain 0.1: 0.125
+permutation p, partial gain 0.1: 0.000
+t-test p, partial gain 0.1: 0.002
+tied queries, partial gain 0.1: 2
+schemes where semantic leads: 4 of 4

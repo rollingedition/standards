@@ -1,0 +1,11 @@
+exact share of all judged pairs: 0.249
+judged pairs whose text has every query word: 1,177
+of them exact: 0.777
+of them partial: 0.211
+of them irrelevant: 0.012
+exact pairs: 3,252
+exact pairs whose text misses a query word: 2,337
+of them, still missing one with attributes added: 2,251
+exact products for clear shower curtain: 12
+of them without the word clear in their text: 8
+of those, with clear in their attributes: 4

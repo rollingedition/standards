@@ -1,0 +1,19 @@
+bm25 ndcg@10: 0.725
+bm25 judged@10: 0.927
+semantic ndcg@10: 0.830
+semantic judged@10: 0.990
+semantic better: 21
+bm25 better: 7
+tied: 2
+test queries with a size in inches: 2
+of those, bm25 better: 2
+
+queries where bm25 is better:
+query_id
+63                                     monthly calendar
+72                                   fold in half table
+94             kohler whitehaven farmhouse kitchen sink
+285    48" sliding single track , barn door for laundry
+292                             decorative white pillow
+293                            wood floor protector mat
+482                                48 inch kitchen hood

@@ -43,11 +43,21 @@ def check_section_ids(head: Book, base: Book | None = None, previous: dict | Non
     return problems
 
 
-def check_kind_label(labels: list[str]) -> list[str]:
-    """At least one kind: label, and no unknown ones."""
+NARRATION_DIR = "narration/"     # a book's spoken descriptions and lexicon, beside its chapters, never on the page
+
+
+def narration_only(paths: list[str]) -> bool:
+    """Whether a change touches nothing but the book's narration files. The page doesn't change, so such a change has no
+    kind of change for an edition: it needs no kind label, cuts no edition of its own, and rides with the next one."""
+    return bool(paths) and all(p.startswith(NARRATION_DIR) for p in paths)
+
+
+def check_kind_label(labels: list[str], changed: list[str] | None = None) -> list[str]:
+    """At least one kind: label, and no unknown ones. A pull request that changes only narration files (`changed`, the
+    paths it touches) needs none, since it changes nothing a reader sees on the page; an unknown one is still refused."""
     kinds = [label for label in labels if label.startswith("kind:")]
     problems = [f"unknown label {label!r}; kind labels are {', '.join(KIND_LABELS)}" for label in kinds if label not in KIND_LABELS]
-    if not any(label in KIND_LABELS for label in kinds):
+    if not any(label in KIND_LABELS for label in kinds) and not narration_only(changed or []):
         problems.append(f"needs at least one kind label ({', '.join(KIND_LABELS)}) before it can merge")
     return problems
 
@@ -55,6 +65,20 @@ def check_kind_label(labels: list[str]) -> list[str]:
 def labels_from_event(path: Path) -> list[str]:
     event = json.loads(Path(path).read_text(encoding="utf-8"))
     return [label["name"] for label in event.get("pull_request", {}).get("labels", [])]
+
+
+def changed_from_event(path: Path, book: Path) -> list[str] | None:
+    """The paths a pull request changes, from its event's base and head commits and the book's checkout: what
+    `git diff base...head` lists, the pull request's own changes whatever has merged since it branched. None when the
+    event or the checkout can't say, so the check asks for a kind label as before."""
+    pr = json.loads(Path(path).read_text(encoding="utf-8")).get("pull_request") or {}
+    base, head = (pr.get("base") or {}).get("sha"), (pr.get("head") or {}).get("sha")
+    if not base or not head:
+        return None
+    r = subprocess.run(["git", "-C", str(book), "diff", "--name-only", f"{base}...{head}"], capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    return [line for line in r.stdout.splitlines() if line]
 
 
 def book_at_ref(repo: Path, ref: str, into: Path) -> Book:

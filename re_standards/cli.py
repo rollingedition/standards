@@ -1,7 +1,8 @@
 """`re-check`: the checks every book pull request runs.
 
 Book repos call these through the reusable workflows in .github/workflows/. Each check prints one
-"ok" line on success, or every problem it found and exits 1.
+"ok" line on success, or every problem it found and exits 1. A check that warns, as narration does, lists what it
+found and exits 0, unless --strict.
 """
 from __future__ import annotations
 
@@ -12,23 +13,25 @@ import os
 import sys
 from pathlib import Path
 
-from . import bookfmt, catalog, checks, community, data_path, examples, readme, resolve, style
+from . import bookfmt, catalog, checks, community, data_path, examples, readme, resolve, spoken, style
 
 
-def report(name: str, problems: list[str], ok_line: str) -> int:
+def report(name: str, problems: list[str], ok_line: str, warn: bool = False) -> int:
+    """Print what a check found. A check that warns (warn) lists its warnings and still passes."""
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if problems:
-        print(f"{name}: {len(problems)} problem(s)", file=sys.stderr)
+        what = "warning(s)" if warn else "problem(s)"
+        print(f"{name}: {len(problems)} {what}", file=sys.stderr)
         for p in problems:
             print(f"  - {p}", file=sys.stderr)
-        text = f"### {name}: failed\n\n" + "\n".join(f"- {p}" for p in problems) + "\n"
+        text = f"### {name}: {f'{len(problems)} {what}' if warn else 'failed'}\n\n" + "\n".join(f"- {p}" for p in problems) + "\n"
     else:
         print(f"ok  {ok_line}")
         text = f"### {name}: passed\n\n{ok_line}\n"
     if summary:
         with open(summary, "a", encoding="utf-8") as f:
             f.write(text)
-    return 1 if problems else 0
+    return 1 if problems and not warn else 0
 
 
 def taxonomy_path(args) -> Path:
@@ -75,8 +78,15 @@ def cmd_section_ids(args) -> int:
 
 def cmd_kind_label(args) -> int:
     labels = checks.labels_from_event(Path(args.event)) if args.event else [x for x in (args.labels or "").split(",") if x]
-    problems = checks.check_kind_label(labels)
-    return report("Kind label", problems, "kind labels: " + ", ".join(x for x in labels if x.startswith("kind:")))
+    changed = checks.changed_from_event(Path(args.event), Path(args.book)) if args.event and args.book else None
+    problems = checks.check_kind_label(labels, changed)
+    kinds = [x for x in labels if x.startswith("kind:")]
+    if not kinds and checks.narration_only(changed or []):
+        ok = (f"only narration files changed ({', '.join(changed)}): no kind label needed, since the page doesn't "
+              "change; the change rides with the book's next edition")
+    else:
+        ok = "kind labels: " + ", ".join(kinds)
+    return report("Kind label", problems, ok)
 
 
 def workflow_command(level: str, title: str, message: str) -> None:
@@ -150,6 +160,22 @@ def cmd_style(args) -> int:
                   f"{len(book.chapters)} chapter(s), {words:,} words of prose: the lint rules of the writing standards pass")
 
 
+def cmd_narration(args) -> int:
+    book = bookfmt.load_book(Path(args.book))
+    if args.chapter and args.chapter not in {c.chapter_id for c in book.chapters}:
+        return report("Narration", [f"there's no chapter {args.chapter!r} in this book"], "")
+    if args.script:
+        lines = (spoken.chapter_script(book, args.chapter, edition=args.edition) if args.chapter
+                 else spoken.book_script(book, edition=args.edition))
+        print(spoken.format_script(lines), end="")
+        return 0
+    warnings = spoken.check_narration(book, chapter_id=args.chapter)
+    chapters = f"chapter {args.chapter!r}" if args.chapter else f"{len(book.chapters)} chapter(s)"
+    rc = report("Narration", warnings, f"{chapters}: every term has a reading, and every example, block and table a description",
+                warn=True)
+    return 1 if warnings and args.strict else rc
+
+
 def cmd_readme(args) -> int:
     book = bookfmt.load_book(Path(args.book))
     problems = readme.check(book, write=args.write)
@@ -187,9 +213,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--previous", help="the previous edition's sections.json: a path or URL")
     s.set_defaults(fn=cmd_section_ids)
 
-    s = sub.add_parser("kind-label", help="the pull request has at least one kind: label")
+    s = sub.add_parser("kind-label", help="the pull request has at least one kind: label, unless it changes only narration "
+                                          "files")
     s.add_argument("--event", help="the GitHub event JSON (GITHUB_EVENT_PATH)")
     s.add_argument("--labels", help="comma-separated labels, instead of --event")
+    s.add_argument("--book", help="the book's checkout, with the event's base and head commits: a pull request that "
+                                  "changes only narration/ needs no kind label")
     s.set_defaults(fn=cmd_kind_label)
 
     s = sub.add_parser("examples", help="run every example in its pinned runtime and compare its output")
@@ -205,6 +234,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--book", default=".")
     s.add_argument("--config", help="writing.toml (default: this standards checkout)")
     s.set_defaults(fn=cmd_style)
+
+    s = sub.add_parser("narration", help="the spoken script: terms no rule reads, and examples, blocks and tables with no "
+                       "description (warns; never fails, unless --strict)")
+    s.add_argument("--book", default=".")
+    s.add_argument("--chapter", help="one chapter's ID (default: every chapter)")
+    s.add_argument("--script", action="store_true", help="print the spoken script instead: each line's number, kind and unit, then its words")
+    s.add_argument("--edition", help="the edition code the opening reads, with --script")
+    s.add_argument("--strict", action="store_true", help="exit 1 when there are warnings")
+    s.set_defaults(fn=cmd_narration)
 
     s = sub.add_parser("readme", help="the generated front page: README.md, CITATION.cff, LICENSE, LICENSE-CODE and renovate.json")
     s.add_argument("--book", default=".")

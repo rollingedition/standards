@@ -11,6 +11,9 @@
 deps = ["examples/requirements.txt", "examples/requirements.in", "examples/.python-version"]
 prose = ["chapters/*.md"]
 code = ["examples/*.py", "examples/*.out", "examples/data/*", "recordings/*", "prep/*"]
+# The spoken descriptions and lexicon narration reads, beside the chapters. They're never on the page, so a change to
+# them alone has no kind of change: it needs no kind label, cuts no edition of its own, and rides with the next one.
+narration = ["narration/*.toml"]
 meta = ["book.toml", "redirects.yml", "CODEOWNERS", "renovate.json", "README.md", "CITATION.cff", "LICENSE",
         "LICENSE-CODE", ".gitignore", ".github/workflows/*"]
 
@@ -56,8 +59,8 @@ reader = "Adds a new package to the examples, or installs one from anywhere but 
 files = ["examples/requirements.txt", "recordings/requirements.txt"]
 
 [flags.unknown-files]
-what = "Adds, changes or removes a file that isn't one of the kinds a book holds: chapters, examples and their data, pins, recordings and the book's own settings"
-reader = "Adds, changes or removes a file that isn't part of a book: its chapters, its examples and their data, the library versions they use, its recorded model outputs and its settings"
+what = "Adds, changes or removes a file that isn't one of the kinds a book holds: chapters, examples and their data, pins, recordings, narration and the book's own settings"
+reader = "Adds, changes or removes a file that isn't part of a book: its chapters, its examples and their data, the library versions they use, its recorded model outputs, its narration and its settings"
 
 [flags.book-identity]
 what = "Changes the book's slug, title, authors, sponsor or status in book.toml: what it's called, who it credits, who funds it and whether it's listed"

@@ -25,6 +25,10 @@ Draft only with a model on the model bar: Claude Opus 5.5, or an equivalent or b
 4. **Write the prose** in the house pattern (W-8), so it reads cleanly the first time (W-49 to W-53): introduce the case and anything else the reader will keep meeting by what it is, what it's for and the name you'll use; make every reference say which one it means; and open each section from where the reader is. Bind every number you quote from an output (`{{out:example-id:label}}`), and every version (`{{version:package}}`). Cite a primary source from the source file for every claim an example doesn't show (W-28). Never cite anything the source file doesn't list, unless you opened it yourself.
 5. **Lint.** Run `re-check style --book .` and fix every problem in your chapter. Length problems in other chapters aren't yours.
 6. **Check IDs.** Every `##` and `###` heading has an explicit `{#section-id}`, and the chapter has a `chapter_id` (W-42). Run `re-check section-ids --book .`.
+7. **Write the narration.** Narration reads the chapter word for word, but never its code, output or tables (W-54 to W-56):
+   - Describe each example, fenced block and table in `narration/{chapter_id}.toml`, and add a reading to `narration/lexicon.toml` for each term a voice can't read.
+   - Run `re-check narration --book . --chapter {chapter_id}` and work until it lists nothing. Read what will be spoken with `--script`.
+8. **Narrate the chapter.** Run `re narrate --book . --chapter {chapter_id}`. It records every paragraph, checks each recording against its words, and writes a report. Fix a paragraph that fails through the lexicon or a description, never by rewriting the text for the voice.
 
 ## When a critic's findings come back
 
@@ -32,4 +36,4 @@ Fix each finding, or say in one line why it's wrong. Never edit an expected outp
 
 ## What you return
 
-A short summary: the chapter's word count, its examples and their status, the lint result, and anything you couldn't resolve.
+A short summary: the chapter's word count, its examples and their status, the lint result, the narration check's result and any paragraph the narration report still lists, and anything you couldn't resolve.

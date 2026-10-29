@@ -1,0 +1,238 @@
+# The shared rules of narration (re_standards/spoken.py): how a book's text becomes the words a voice reads.
+# A book adds its own terms in narration/lexicon.toml, and its descriptions in narration/{chapter_id}.toml.
+# Every word read aloud is the edition's text or one of the templates below; nothing is written by a model.
+
+# Raise this whenever a change here can change how a voice reads the same words, such as a pause or a template:
+# a recorded paragraph is kept only while its words, its voice and this number stay the same.
+rules_version = 2
+
+[templates]
+# A chapter opens with its number, its title and the book's title, then the disclosure, and ends with its number. It
+# never names the edition, so a chapter whose words didn't change keeps its recording across editions; the whole
+# book's credits name it. Numbers and codes are written as digits: the rules below read them as words.
+opening = "Chapter {number}. {title}. {book_title}."
+disclosure = "Read by an AI voice, word for word from this edition's text. Code, output and tables are on the page."
+ending = "End of chapter {number}."
+heading = "{text}."                      # a section heading, read as a sentence
+example = "Example: {name}. {description}"
+ordered_item = "{number}. {text}"        # an item of a numbered list; a bulleted one is read as it is
+quote = "{text}"
+link_url = "a link on the page"          # a link whose text is its address
+
+[templates.fallback]                     # what's read where the book gives no description
+example = "Example: {name}. Its code and output are on the page."
+table = "A table is on the page."
+
+[templates.fallback.block]               # a fenced block that isn't an example, by its language
+text = "A formula is on the page."
+default = "Code is on the page."
+
+[templates.book]
+# The whole-book file opens and closes with credits. Each entry is one sentence, or a list of choices: the first
+# whose fields are all given is read, and an entry with none is left out. The caller gives the voice's credit
+# (voice) and where the current edition is (where); the title and edition come from the book.
+opening = [
+    "{title}.",
+    "By Rolling Edition, with AI.",
+    ["Read by an AI voice, {voice}.", "Read by an AI voice."],
+    "Edition {edition}.",
+    "Its text is under the Creative Commons Attribution 4.0 licence, and its code under the MIT licence.",
+]
+closing = [
+    ["This is the end of {title}, edition {edition}.", "This is the end of {title}."],
+    "The current edition is at {where}.",
+]
+
+[numbers]
+and = true                 # "one hundred and seventy-seven", as British English reads it
+years = [1900, 2099]       # a typed four-digit number in this range is a year: "twenty twenty-two", "two thousand four".
+                           # A number a binding fills in is a count, never a year: "nineteen thirty-seven" would be wrong
+point = "point"            # decimals digit by digit: "zero point six one five"
+minus = "minus"            # a minus sign before a number
+percent = "percent"
+by = "by"                  # "3×3"
+range = "to"               # "6–10"
+version = "version"        # "v2"
+plus = "plus"              # a plus sign before a number
+over = "over"              # "8/3", "1/(60 + rank)"
+about = "about"            # "~1"
+times = "times"            # "14x"
+currency = { "$" = "dollars", "€" = "euros", "£" = "pounds" }   # "$3" is "three dollars"
+times_ten = "times ten to the"   # "3.00e-03"
+utc = "U T C"
+squared = "squared"        # a superscript 2
+cubed = "cubed"
+power = "to the"           # any other superscript: "10⁻⁵" is "ten to the minus five"
+suffixes = { K = "thousand", M = "million", B = "billion" }   # "360M", "1.7B"
+months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+          "November", "December"]
+
+[symbols]
+# A character read as a word wherever it stands.
+"==" = "equals"
+"!=" = "is not equal to"
+"<=" = "at most"
+">=" = "at least"
+"=" = "equals"
+"@" = "at"
+"&" = "and"
+"−" = "minus"
+"×" = "times"
+"·" = "times"
+"±" = "plus or minus"
+"≈" = "about"
+"≤" = "at most"
+"≥" = "at least"
+"≠" = "is not equal to"
+"∞" = "infinity"
+"√" = "the square root of"
+"^" = "to the"
+"Σ" = "the sum of"
+"←" = "becomes"
+"→" = "to"
+"α" = "alpha"
+"β" = "beta"
+"γ" = "gamma"
+"δ" = "delta"
+"Δ" = "delta"
+"ε" = "epsilon"
+"η" = "eta"
+"θ" = "theta"
+"λ" = "lambda"
+"μ" = "mu"
+"π" = "pi"
+"ρ" = "rho"
+"σ" = "sigma"
+"τ" = "tau"
+"φ" = "phi"
+"ω" = "omega"
+
+[spaced]
+# Read as a word only with a space on each side, as in "p < 0.05". Attached, as in "<sep>", it's code, which a
+# book's lexicon says how to read.
+"<" = "less than"
+">" = "greater than"
+"+" = "plus"
+"/" = "over"
+"|" = "given"
+
+[code]
+# Inline code that no lexicon entry covers is read by its words: lib.store.product_text is "lib dot store dot
+# product text", and governance/users.toml "governance slash users dot toml".
+dot = "dot"
+slash = "slash"
+
+[terms]
+# Exact, case-sensitive replacements, longest first, at word boundaries. A book's narration/lexicon.toml adds to
+# them and wins where both have a term.
+"e.g." = "for example"
+"i.e." = "that is"
+"et al." = "et al."
+"etc." = "et cetera"
+"vs." = "versus"
+"cf." = "compare"
+"AI" = "A I"
+"API" = "A P I"
+"APIs" = "A P Is"
+"CLI" = "C L I"
+"CPU" = "C P U"
+"CPUs" = "C P Us"
+"CSV" = "C S V"
+"EPUB" = "E pub"
+"EU" = "E U"
+"GPU" = "G P U"
+"GPUs" = "G P Us"
+"HTML" = "H T M L"
+"HTTP" = "H T T P"
+"HTTPS" = "H T T P S"
+"ID" = "I D"
+"IDs" = "I Ds"
+"JSON" = "Jason"
+"LLM" = "L L M"
+"LLMs" = "L L Ms"
+"MIT" = "M I T"
+"PDF" = "P D F"
+"PDFs" = "P D Fs"
+"SDK" = "S D K"
+"SQL" = "S Q L"
+"UI" = "U I"
+"UK" = "U K"
+"URL" = "U R L"
+"URLs" = "U R Ls"
+"US" = "U S"
+"UTF-8" = "U T F eight"
+"A/B" = "A B"
+"C++" = "C plus plus"
+"CI" = "C I"
+"CI/CD" = "C I C D"
+"FAQ" = "F A Q"
+"GB" = "gigabytes"
+"GitHub" = "GitHub"
+"GPT" = "G P T"
+"IP" = "I P"
+"KB" = "kilobytes"
+"MB" = "megabytes"
+"NaN" = "not a number"
+"NumPy" = "num pie"
+"PyTorch" = "pie torch"
+"RFC" = "R F C"
+"SciPy" = "sigh pie"
+"TB" = "terabytes"
+"URI" = "U R I"
+"URIs" = "U R Is"
+"UTC" = "U T C"
+"UUID" = "U U I D"
+"UUIDs" = "U U I Ds"
+"README" = "read me"
+"rollingedition.com" = "rolling edition dot com"
+# SQL's keywords, read as words where they stand in capitals
+"SELECT *" = "select star"
+"SELECT" = "select"
+"FROM" = "from"
+"WHERE" = "where"
+"JOIN" = "join"
+"GROUP BY" = "group by"
+"ORDER BY" = "order by"
+"PARTITION BY" = "partition by"
+"HAVING" = "having"
+"INSERT" = "insert"
+"UPDATE" = "update"
+"DELETE" = "delete"
+"MERGE" = "merge"
+"CREATE" = "create"
+"DROP" = "drop"
+"NULL" = "null"
+"USING" = "using"
+"CASE" = "case"
+"WHEN" = "when"
+"THEN" = "then"
+"ELSE" = "else"
+"DISTINCT" = "distinct"
+"LIMIT" = "limit"
+"VALUES" = "values"
+"AND" = "and"
+"OR" = "or"
+"NOT" = "not"
+"IN" = "in"
+"IS" = "is"
+"AS" = "as"
+"ON" = "on"
+"TRUE" = "true"
+"FALSE" = "false"
+"SET" = "set"
+"CALL" = "call"
+"UNION" = "union"
+"TABLE" = "table"
+"VIEW" = "view"
+"WINDOW" = "window"
+"FILTER" = "filter"
+"COALESCE" = "coalesce"
+
+[words]
+# Case-insensitive whole words. A book's lexicon adds its own, such as the words of its example IDs.
+
+[check]
+# `re-check narration` lists every word in the spoken text that still holds a digit or one of these characters,
+# or is written in capitals or camelCase, unless a lexicon reads it or it's allowed here.
+characters = "_/@#<>{}|`\\^~*+=$€£%"
+allow = ["I", "A", "OK", "TV"]

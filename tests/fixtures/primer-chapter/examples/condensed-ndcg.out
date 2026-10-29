@@ -1,0 +1,15 @@
+bm25 ndcg@10: 0.725
+bm25 condensed ndcg@10: 0.778
+semantic ndcg@10: 0.830
+semantic condensed ndcg@10: 0.834
+bm25 ndcg@10 for outdoor light fixtures: 0.286
+bm25 condensed ndcg@10 for outdoor light fixtures: 1.000
+share of bm25's gain from outdoor light fixtures and beach blue headboard: 0.612
+semantic minus bm25: 0.105
+semantic minus bm25, condensed: 0.056
+change in the lead: -0.049
+95% interval for the change: -0.138 to -0.015
+t-test p for the change: 0.073
+permutation p for the change: 0.036
+t-test p for the condensed lead: 0.011
+permutation p for the condensed lead: 0.009

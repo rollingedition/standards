@@ -73,6 +73,48 @@ def test_kind_label_reads_the_github_event(tmp_path):
     assert cli.main(["kind-label", "--event", str(event)]) == 1
 
 
+def test_a_change_to_narration_alone_needs_no_kind_label():
+    narration = ["narration/lexicon.toml", "narration/what-relevance-means.toml"]
+    assert checks.narration_only(narration) and not checks.narration_only([]) and not checks.narration_only(
+        narration + ["chapters/01-a.md"]) and not checks.narration_only(["chapters/narration/x.toml"])
+    assert checks.check_kind_label([], narration) == []
+    assert checks.check_kind_label(["tier:expert"], narration) == []
+    assert "needs at least one kind label" in checks.check_kind_label([], narration + ["chapters/01-a.md"])[0]
+    assert "needs at least one kind label" in checks.check_kind_label([], [])[0]       # nothing known: as before
+    assert any("unknown label 'kind:audio'" in p for p in checks.check_kind_label(["kind:audio"], narration))
+
+
+def test_the_kind_label_check_reads_what_the_pull_request_changes_from_the_book(tmp_path, capsys):
+    import subprocess
+    book = tmp_path / "book"
+    git = lambda *a: subprocess.run(["git", "-C", str(book), "-c", "user.name=T", "-c", "user.email=t@example.invalid",  # noqa: E731
+                                     *a], check=True, capture_output=True, text=True).stdout.strip()
+    (book / "chapters").mkdir(parents=True)
+    (book / "chapters" / "01-a.md").write_text("# A\n")
+    git("init", "-q", "-b", "main")
+    git("add", "-A")
+    git("commit", "-qm", "base")
+    base = git("rev-parse", "HEAD")
+    git("checkout", "-qb", "describe")
+    (book / "narration").mkdir()
+    (book / "narration" / "a.toml").write_text('[examples.x]\nsay = "It prints one."\n')
+    git("add", "-A")
+    git("commit", "-qm", "describe")
+    head = git("rev-parse", "HEAD")
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({"pull_request": {"labels": [], "base": {"sha": base}, "head": {"sha": head}}}))
+    assert checks.changed_from_event(event, book) == ["narration/a.toml"]
+    assert cli.main(["kind-label", "--event", str(event), "--book", str(book)]) == 0
+    assert "only narration files changed (narration/a.toml): no kind label needed" in capsys.readouterr().out
+    assert cli.main(["kind-label", "--event", str(event)]) == 1                 # without the book, a label is needed
+    (book / "chapters" / "01-a.md").write_text("# A, again\n")
+    git("commit", "-qam", "and the page")
+    event.write_text(json.dumps({"pull_request": {"labels": [], "base": {"sha": base}, "head": {"sha": git("rev-parse", "HEAD")}}}))
+    assert cli.main(["kind-label", "--event", str(event), "--book", str(book)]) == 1
+    event.write_text(json.dumps({"pull_request": {"labels": [], "base": {"sha": "0" * 40}, "head": {"sha": head}}}))
+    assert checks.changed_from_event(event, book) is None                       # an unknown commit: no verdict
+
+
 # ---------------------------------------------------------------- examples
 
 def pinned(root, python="3.12.15", requirements=""):

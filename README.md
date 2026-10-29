@@ -43,7 +43,7 @@ Narration reads a book's text word for word, and never its code, output or table
 - Inline code is read through the lexicon, or by its parts: `lib.store.product_text` is "lib dot store dot product text".
 - Numbers, years, decimals, signs, symbols and edition codes are read as words: 0.615 is "zero point six one five", (Chen et al., 2022) is "twenty twenty-two", 2026.10.6 is "twenty twenty-six point ten point six". A number a binding fills in is a count, never a year.
 - Each example, fenced block and table is read as the description the book writes for it, or announced where it has none ("Example: inverted index by hand. Its code and output are on the page.").
-- A chapter opens with its number and title, the book's title, the edition and the disclosure, and ends with its number. The whole-book file opens and closes with credits.
+- A chapter opens with its number and title, the book's title and the disclosure, and ends with its number. It never names the edition, so a chapter whose words didn't change keeps its recording from edition to edition. The whole-book file opens and closes with credits, which name the edition.
 
 Every word is the edition's text or a template in `data/narration.toml`, whose `rules_version` a recorded paragraph's key includes, so a change to how the rules read means recording again.
 
@@ -69,7 +69,7 @@ starts = "| Measure |"
 say = "A table of the mean difference, interval and p-value of each change this chapter tested."
 ```
 
-`re-check narration` lists, per chapter, every term no rule reads (a word that still holds a digit or a character such as `_`, `/` or `<`, or is written in capitals or camelCase, and inline code named whole), every example, block and table with no description, every description whose example, section or first line no longer matches, and bindings that don't resolve. It warns, and exits 0 unless `--strict`. `--script` prints the spoken script instead, for a chapter with `--chapter` or the whole book, with `--edition` for the opening.
+`re-check narration` lists, per chapter, every term no rule reads (a word that still holds a digit or a character such as `_`, `/` or `<`, or is written in capitals or camelCase, and inline code named whole), every example, block and table with no description, every description whose example, section or first line no longer matches, and bindings that don't resolve. It warns, and exits 0 unless `--strict`. `--script` prints the spoken script instead, for a chapter with `--chapter` or the whole book, with `--edition` for the whole book's credits.
 
 ## Licence
 

@@ -240,7 +240,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--book", default=".")
     s.add_argument("--chapter", help="one chapter's ID (default: every chapter)")
     s.add_argument("--script", action="store_true", help="print the spoken script instead: each line's number, kind and unit, then its words")
-    s.add_argument("--edition", help="the edition code the opening reads, with --script")
+    s.add_argument("--edition", help="the edition code the whole book's credits read, with --script")
     s.add_argument("--strict", action="store_true", help="exit 1 when there are warnings")
     s.set_defaults(fn=cmd_narration)
 

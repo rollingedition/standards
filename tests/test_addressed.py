@@ -1,3 +1,5 @@
+import subprocess
+
 import pytest
 
 from re_standards import addressed, bookfmt, cli
@@ -99,8 +101,8 @@ def test_book_toml_text_is_checked(tmp_path):
     assert len(found) == 1 and found[0].startswith("book.toml: line 3: override-instructions:")
 
 
-@pytest.mark.parametrize("ch, name", [("​", "U+200B"), ("⁠", "U+2060"), ("‮", "U+202E"), ("⁦", "U+2066"),
-                                       ("﻿", "U+FEFF"), ("\U000e0041", "U+E0041")])
+@pytest.mark.parametrize("ch, name", [("\u200b", "U+200B"), ("\u2060", "U+2060"), ("\u202e", "U+202E"), ("\u2066", "U+2066"),
+                                       ("\ufeff", "U+FEFF"), ("\U000e0041", "U+E0041")])
 def test_hidden_characters_are_flagged_in_prose_and_in_code(tmp_path, ch, name):
     found = problems(tmp_path, f"Plain{ch}text.\n\n```python\nx = 1{ch}\n```\n\n`code{ch}`")
     assert [name in p and "hidden-character" in p for p in found] == [True] * 3
@@ -108,9 +110,9 @@ def test_hidden_characters_are_flagged_in_prose_and_in_code(tmp_path, ch, name):
 
 
 def test_hidden_characters_are_flagged_in_examples_and_other_files(tmp_path):
-    root = make_book(tmp_path, examples={"hello": ('print("hi​")\n', "hi\n")})
+    root = make_book(tmp_path, examples={"hello": ('print("hi\u200b")\n', "hi\n")})
     (root / "notes").mkdir()
-    (root / "notes" / "plan.md").write_text("plan‮\n")
+    (root / "notes" / "plan.md").write_text("plan\u202e\n")
     found = addressed.check_addressed(bookfmt.load_book(root))
     assert [p.split(":")[0] for p in found] == ["examples/hello.py", "notes/plan.md"]
 
@@ -124,9 +126,9 @@ def test_tag_characters_are_decoded_in_the_message(tmp_path):
 def test_a_byte_order_mark_is_fine_only_first(tmp_path):
     root = make_book(tmp_path)
     path = root / "examples" / "hello.py"
-    path.write_text("﻿" + path.read_text())
+    path.write_text("\ufeff" + path.read_text())
     assert addressed.check_addressed(bookfmt.load_book(root)) == []
-    path.write_text(path.read_text() + "﻿")
+    path.write_text(path.read_text() + "\ufeff")
     assert len(addressed.check_addressed(bookfmt.load_book(root))) == 1
 
 
@@ -134,9 +136,9 @@ def test_datasets_tolerate_zero_width_spaces_but_not_tags_or_bidi(tmp_path):
     root = make_book(tmp_path)
     (root / "examples" / "data").mkdir()
     csv = root / "examples" / "data" / "items.csv"
-    csv.write_text("1,tile​,x\n")
+    csv.write_text("1,tile\u200b,x\n")
     assert addressed.check_addressed(bookfmt.load_book(root)) == []
-    csv.write_text("1,tile‮,x\n2,\U000e0041\n")
+    csv.write_text("1,tile\u202e,x\n2,\U000e0041\n")
     assert len(addressed.check_addressed(bookfmt.load_book(root))) == 2
 
 
@@ -145,7 +147,7 @@ def test_binary_files_and_skipped_folders_are_not_read(tmp_path):
     (root / "cover.png").write_bytes(b"\x89PNG\xe2\x80\x8b")
     (root / "blob.bin").write_bytes(b"\xff\xfe\xe2\x80\x8b")
     (root / ".venv").mkdir()
-    (root / ".venv" / "a.py").write_text("​")
+    (root / ".venv" / "a.py").write_text("\u200b")
     assert addressed.check_addressed(bookfmt.load_book(root)) == []
 
 
@@ -163,3 +165,19 @@ def test_the_release_checks_and_the_workflow_run_it():
     from re_standards import standards_root
     flow = (standards_root() / ".github" / "workflows" / "book-checks.yml").read_text()
     assert "re-check addressed --book ." in flow
+
+
+def test_only_the_books_own_files_are_read_in_a_repository(tmp_path):
+    """Book CI checks the standards out in .standards/, inside the book's checkout: those files aren't the book's."""
+    root = make_book(tmp_path)
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    (root / ".standards" / "tests").mkdir(parents=True)
+    (root / ".standards" / "tests" / "fixture.py").write_text("x = '\u200b'\n")
+    (root / "other-checkout").mkdir()
+    (root / "other-checkout" / ".git").write_text("gitdir: elsewhere\n")
+    found = addressed.check_addressed(bookfmt.load_book(root))
+    assert not [p for p in found if "hidden-character" in p]
+    (root / "notes").mkdir(exist_ok=True)
+    (root / "notes" / "plan.md").write_text("plan\u202e\n")
+    found = addressed.check_addressed(bookfmt.load_book(root))
+    assert [p for p in found if p.startswith("notes/plan.md") and "hidden-character" in p]

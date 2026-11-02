@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import fnmatch
 import re
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -70,9 +71,20 @@ def _blank(text: str, spans: list[tuple[int, int]]) -> str:
     return "".join(chars)
 
 
+def book_files(root: Path) -> list[Path]:
+    """The book's own files: what its git repository tracks, and new files it doesn't ignore, so a checkout of
+    something else inside it (CI puts the standards in .standards/) isn't read as the book. Outside a repository,
+    every file under the root."""
+    r = subprocess.run(["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        return sorted(root.rglob("*"))
+    return sorted({root / rel for rel in r.stdout.split("\0") if rel})
+
+
 def scan_hidden_characters(root: Path, rules: Rules) -> list[str]:
     problems: list[str] = []
-    for path in sorted(root.rglob("*")):
+    for path in book_files(root):
         rel = path.relative_to(root)
         if (not path.is_file() or path.is_symlink() or rules.skip_dirs & set(rel.parts[:-1])
                 or path.suffix.lower() in rules.skip_suffixes):

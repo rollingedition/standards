@@ -24,7 +24,8 @@ allow = [["200B", "200F"], ["2060", "2064"], ["FEFF", "FEFF"]]
 
 [files]
 # What the hidden-character scan reads: every file under the book that decodes as UTF-8 text.
-skip_dirs = [".git", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", ".ruff_cache"]
+skip_dirs = [".git", ".standards", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", ".ruff_cache"]
+# .standards is where book CI checks the standards out; outside a repository, these are skipped by name
 skip_suffixes = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".epub", ".zip", ".gz", ".whl", ".woff", ".woff2",
                  ".ttf", ".otf", ".mp3", ".wav", ".ogg", ".m4a", ".mp4", ".pyc", ".npy", ".npz", ".pt", ".safetensors"]
 

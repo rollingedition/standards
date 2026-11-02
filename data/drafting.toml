@@ -1,12 +1,34 @@
-# The model bar for drafting Rolling Edition books: the models a book may be drafted with. A proposed default: change it here, never in code.
+# The model bar for drafting Rolling Edition books: the models a book may be drafted with, and which one does each job.
+# A proposed default: change it here, never in code.
 #
-# Books are drafted with Claude Opus 5.5, or a model that is equivalent or better. Equivalent or better models may be
-# added to `models`. Open models stay allowed only for recorded outputs (W-48, `recordings/`), never for drafting, so
-# this list doesn't apply to a recording's `model`.
+# Since Nov 1, 2026, after a measured test, Claude Haiku 5.5 plans, researches, writes and fixes, and Claude Opus 5.5
+# critiques every chapter and the whole book. A book a member makes for themselves is critiqued by Claude Sonnet 5.5,
+# or by Opus as an upgrade. Every task's prompt stays under `max_prompt_tokens`, so Haiku's lower price applies. Open
+# models stay allowed only for recorded outputs (W-48, `recordings/`), never for drafting, so this file doesn't apply
+# to a recording's `model`.
 #
-# Nothing reads or enforces the list yet: the writer prompt (`prompts/writer.md`) names it.
+# Nothing enforces it yet: the writer prompt (`prompts/writer.md`) and the agents' briefs name it.
 
 [drafting]
 models = [
-  "claude-opus-5-5",   # Claude Opus 5.5
+  "claude-haiku-5-5",   # Claude Haiku 5.5: drafting
+  "claude-sonnet-5-5",  # Claude Sonnet 5.5: critiques members' own books
+  "claude-opus-5-5",    # Claude Opus 5.5: critiques Rolling Edition's books
 ]
+
+[drafting.roles]            # Rolling Edition's own books
+plan = "claude-haiku-5-5"
+research = "claude-haiku-5-5"
+write = "claude-haiku-5-5"
+fix = "claude-haiku-5-5"
+critic = "claude-opus-5-5"
+book_critic = "claude-opus-5-5"
+
+[drafting.member_roles]     # a book a member makes for themselves
+critic = "claude-sonnet-5-5"
+critic_upgrade = "claude-opus-5-5"
+
+[drafting.context]
+max_prompt_tokens = 100000  # Haiku's prices are five times higher for a prompt over this
+compact_window = 100000     # each task compacts its context at compact_percent of this window
+compact_percent = 80

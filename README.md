@@ -4,7 +4,7 @@ How a Rolling Edition book gets verified, in the open. This is the public, read-
 
 | Path | What |
 | --- | --- |
-| `.github/workflows/book-checks.yml` | The reusable workflow every book pull request runs: examples, book manifest, section IDs |
+| `.github/workflows/book-checks.yml` | The reusable workflow every book pull request runs: examples, book manifest, text addressed to a model, section IDs |
 | `.github/workflows/kind-label.yml` | The kind-label check, rerun whenever labels change. A pull request that changes only the book's narration files (`narration/`) passes without a kind label: the page doesn't change, so it has no kind of change and rides with the next edition |
 | `data/taxonomy.json` | Areas and skills, the catalog's source of truth, anchored to Wikipedia and Wikidata |
 | `data/review-tiers.toml` | The three review tiers, the file classes triage reads, and the rules that flag a serious risk |
@@ -15,6 +15,7 @@ How a Rolling Edition book gets verified, in the open. This is the public, read-
 | `re_standards/examples.py`, `harness.py`, `runtime/Dockerfile` | Runs every example in its pinned runtime and compares its output |
 | `re_standards/resolve.py`, `data/examples.toml` | Before the runtime is built, reads the pins with a resolver (uv, pinned with this package) for that runtime's Python and platform. Pins that can't be installed together fail the examples check in plain words, naming the conflict, as their own outcome, `unsatisfiable`: in the `--report` JSON, with the resolver's message, and as an annotation on the check run. No example runs then, so it's never mistaken for an example's failure |
 | `writing/` | The writing standards every book follows: rules with IDs, reasons and checks, and annotated exemplars |
+| `re_standards/addressed.py`, `data/addressed.toml` | Text written to an AI system rather than to readers: invisible characters anywhere in the book, and phrases such as "ignore previous instructions" in prose, HTML comments, link titles, image alt text and `book.toml`. Code and inline code are exempt from the phrases, so a chapter that quotes an attack puts it in inline code |
 | `data/writing.toml` | Limits and word lists for `re-check style`, the lint half of the writing standards |
 | `re_standards/spoken.py`, `data/narration.toml` | The spoken script narration reads, built by code from each chapter, and the shared rules it reads with: templates, common terms, symbols and numbers as words (see Narration) |
 | `data/drafting.toml` | The model bar: the models books may be drafted with. Open models are for recorded outputs only (W-48) |
@@ -31,6 +32,7 @@ re-check section-ids --book path/to/book --base-ref <base commit> --previous lat
 re-check kind-label --labels kind:deps
 re-check kind-label --event "$GITHUB_EVENT_PATH" --book .   # a pull request's labels, and the files it changes
 re-check style --book path/to/book    # the lint rules of the writing standards
+re-check addressed --book path/to/book # text addressed to an AI system (hidden characters, injected instructions)
 re-check narration --book path/to/book # terms no rule reads, and examples, blocks and tables with no description (warns)
 re-check wikidata                      # needs the internet; --write fills Wikidata IDs
 python -m re_standards.tape code SLUG EDITION COMMIT_SHA

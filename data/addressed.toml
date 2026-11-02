@@ -1,0 +1,83 @@
+# Limits and word lists for `re-check addressed`: text in a book that is written to an AI system, not to readers.
+# Patterns are regular expressions, matched without regard to case unless the group says case_sensitive; ^ means
+# the start of a line. Prose and hidden places are matched against them; code, inline code included, is not.
+
+[hidden]
+# Characters that hide text from a person reviewing a book. They are checked in every text file, code included.
+# Ranges are inclusive code points, in hex. A byte order mark is fine as a file's first character.
+ranges = [
+    ["E0000", "E007F"],   # Unicode tag characters: ASCII a reader cannot see
+    ["200B", "200F"],     # zero-width space and joiners, and the left-to-right and right-to-left marks
+    ["2060", "2064"],     # word joiner and invisible operators
+    ["FEFF", "FEFF"],     # zero-width no-break space
+    ["202A", "202E"],     # bidirectional embeddings and overrides
+    ["2066", "2069"],     # bidirectional isolates
+]
+first_character_ok = "FEFF"
+
+[hidden.datasets]
+# Third-party datasets hold zero-width characters that scraping left in their text (the Wayfair product file has some),
+# and nobody can edit them away. Under these paths only the ranges in allow are let through; tag characters and
+# bidirectional controls are still caught, since those can spell out text or reorder it.
+paths = ["examples/data/*"]
+allow = [["200B", "200F"], ["2060", "2064"], ["FEFF", "FEFF"]]
+
+[files]
+# What the hidden-character scan reads: every file under the book that decodes as UTF-8 text.
+skip_dirs = [".git", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", ".ruff_cache"]
+skip_suffixes = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".epub", ".zip", ".gz", ".whl", ".woff", ".woff2",
+                 ".ttf", ".otf", ".mp3", ".wav", ".ogg", ".m4a", ".mp4", ".pyc", ".npy", ".npz", ".pt", ".safetensors"]
+
+[[phrases]]
+id = "override-instructions"
+patterns = [
+    '\b(?:ignore|disregard|forget|override|bypass)\s+(?:(?:all|any|every|the|your|my|these|those|of)\s+)*(?:(?:previous|prior|above|earlier|preceding|foregoing)\s+)+(?:instructions?|prompts?|rules|directions|context|messages?|commands?)\b',
+    '\b(?:ignore|disregard|forget)\s+(?:everything|anything|all)\s+(?:above|before|(?:you|I)\s+(?:were|was|have\s+been)\s+told)\b',
+    '\b(?:ignore|disregard|forget)\s+(?:(?:all|any|the|your|these|those)\s+)*(?:system\s+prompt|safety\s+(?:rules|guidelines))\b',
+    '\bfrom\s+now\s+on,?\s+(?:you\s+(?:will|must|should|are)|respond|reply|answer)\b',
+]
+
+[[phrases]]
+id = "new-role"
+patterns = [
+    '\byou\s+are\s+now\s+(?:an?\s+|the\s+)?(?:\w+\s+)?(?:AI|assistant|language\s+model|LLM|chatbot|agent|bot)\b',
+    '\byou\s+are\s+(?:an?\s+)(?:AI\b|LLM\b|language\s+model\b|large\s+language\s+model\b|helpful\s+assistant\b|chatbot\b)',
+    '\bas\s+an?\s+AI\s+(?:language\s+model|assistant|model|agent)\b',
+]
+
+[[phrases]]
+id = "note-to-model"
+patterns = [
+    '\b(?:AI|LLM)\s+(?:agents?|assistants?|systems?|models?|bots?|crawlers?)\s+(?:that\s+are\s+|who\s+are\s+)?(?:reading|summari[sz]ing|reviewing|scraping|processing|parsing)\s+(?:this|the\s+(?:page|text|book|document|chapter))',
+    '\b(?:note|message|attention|hello|hey|dear)\s+(?:to|for)\s+(?:the\s+|any\s+|all\s+)?(?:\w+\s+)?(?:AI|LLM|bots?|chatbots?|agents?|assistants?|crawlers?|reviewers?|critics?)\b',
+    '\bif\s+you\s+(?:are|’re|\x27re)\s+(?:an?\s+|the\s+)?(?:AI|LLM|language\s+model|large\s+language\s+model|bot|chatbot|AI\s+assistant|AI\s+agent|automated\s+(?:reviewer|system|agent))\b',
+    '\b(?:attention|dear|hello|hey|hi)[,:]?\s+(?:AI|LLM|assistant|chatbot|model|agent)\b',
+]
+
+[[phrases]]
+id = "instruction-to-model"
+patterns = [
+    '\b(?:approve|merge|accept)\s+this\s+(?:pull\s+request|PR|change|patch|commit)\b',
+    '\bmark\s+this\s+(?:pull\s+request|PR|book|chapter|change)\s+as\s+(?:approved|verified|passing|safe|correct)\b',
+    '\bdo\s+not\s+(?:tell|inform|alert|notify)\s+the\s+(?:user|human|reader|reviewer|maintainer)s?\b',
+    '\bdon[\x27’]t\s+(?:tell|inform|alert|notify)\s+the\s+(?:user|human|reader|reviewer|maintainer)s?\b',
+    '\b(?:new|updated|additional|revised)\s+(?:system\s+)?instructions\s*:',
+    '\b(?:reveal|print|repeat|output|disclose)\s+(?:me\s+)?your\s+(?:system\s+prompt|initial\s+instructions|hidden\s+instructions)\b',
+]
+
+[[phrases]]
+id = "chat-marker"
+patterns = [
+    '<\|[a-z_]*(?:im_start|im_end|system|user|assistant|endoftext|begin_of_text|start_header_id|end_header_id|eot_id)[a-z_]*\|>',
+    '\[/?INST\]',
+    '<</?SYS>>',
+    '</?system>',
+    '^\s*>?\s*#{1,6}\s*(?:system|assistant|instructions?)\s*:',
+]
+
+[[phrases]]
+id = "turn-label"
+case_sensitive = true
+patterns = [
+    '^\s*>?\s*(?:Human|Assistant|System)\s*:',
+]

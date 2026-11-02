@@ -13,7 +13,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import bookfmt, catalog, checks, community, data_path, examples, readme, resolve, spoken, style
+from . import addressed as addressed_check, bookfmt, catalog, checks, community, data_path, examples, readme, resolve, spoken, style
 
 
 def report(name: str, problems: list[str], ok_line: str, warn: bool = False) -> int:
@@ -160,6 +160,12 @@ def cmd_style(args) -> int:
                   f"{len(book.chapters)} chapter(s), {words:,} words of prose: the lint rules of the writing standards pass")
 
 
+def cmd_addressed(args) -> int:
+    book = bookfmt.load_book(Path(args.book))
+    problems = addressed_check.check_addressed(book, addressed_check.load_config(Path(args.config)) if args.config else None)
+    return report("Text addressed to a model", problems, f"no text addressed to a model in {len(book.chapters)} chapter(s)")
+
+
 def cmd_narration(args) -> int:
     book = bookfmt.load_book(Path(args.book))
     if args.chapter and args.chapter not in {c.chapter_id for c in book.chapters}:
@@ -234,6 +240,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--book", default=".")
     s.add_argument("--config", help="writing.toml (default: this standards checkout)")
     s.set_defaults(fn=cmd_style)
+
+    s = sub.add_parser("addressed", help="text written to an AI system: hidden characters, and phrases such as \"ignore previous "
+                       "instructions\" in prose, comments, link titles and book.toml (code and inline code are exempt)")
+    s.add_argument("--book", default=".")
+    s.add_argument("--config", help="addressed.toml (default: this standards checkout)")
+    s.set_defaults(fn=cmd_addressed)
 
     s = sub.add_parser("narration", help="the spoken script: terms no rule reads, and examples, blocks and tables with no "
                        "description (warns; never fails, unless --strict)")

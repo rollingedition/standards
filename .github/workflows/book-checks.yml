@@ -55,6 +55,8 @@ jobs:
         run: re-check manifest --book .
       - name: Check the generated front page (README, CITATION.cff, licences)
         run: re-check readme --book .
+      - name: Check the book for text addressed to an AI system
+        run: re-check addressed --book .
 
   section-ids:
     name: section-ids

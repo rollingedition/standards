@@ -114,12 +114,16 @@ def test_recorded_outputs_need_a_complete_manifest(tmp_path):
 
 
 def test_the_model_bar_is_configured_and_the_writer_prompt_names_it():
-    """Books are drafted with Claude Opus 5.5 or an equivalent or better model, listed in config."""
+    """Haiku 5.5 drafts and Opus 5.5 critiques Rolling Edition's books; every role's model is on the bar."""
     with open(data_path("drafting.toml"), "rb") as f:
-        models = tomllib.load(f)["drafting"]["models"]
-    assert "claude-opus-5-5" in models and len(models) == len(set(models))
+        bar = tomllib.load(f)["drafting"]
+    models = bar["models"]
+    assert len(models) == len(set(models))
+    assert bar["roles"]["write"] == "claude-haiku-5-5" and bar["roles"]["critic"] == "claude-opus-5-5"
+    assert all(m in models for m in [*bar["roles"].values(), *bar["member_roles"].values()])
+    assert bar["context"]["max_prompt_tokens"] == 100000
     writer = (standards_root() / "prompts" / "writer.md").read_text()
-    assert "`data/drafting.toml`" in writer and "Claude Opus 5.5" in writer
+    assert "`data/drafting.toml`" in writer and "Claude Haiku 5.5" in writer
 
 
 def test_quoted_text_and_as_soon_as_are_not_ours(tmp_path):

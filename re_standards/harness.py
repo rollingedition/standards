@@ -53,9 +53,30 @@ def direct_imports(source, folder="."):
     return tops
 
 
+def loopback_up():
+    """Bring the loopback interface up where a fresh network namespace left it down. `unshare -rn` (the venv backend)
+    does, and a container's --network none doesn't, so without this an example that serves and calls 127.0.0.1, such
+    as a server and its client, would pass in one backend and fail in the other. Nothing beyond the machine becomes
+    reachable. Linux only; where loopback is already up, or the right to change it is missing, it does nothing."""
+    if not sys.platform.startswith("linux"):
+        return
+    import fcntl
+    import socket
+    import struct
+    get_flags, set_flags, up = 0x8913, 0x8914, 0x1          # SIOCGIFFLAGS, SIOCSIFFLAGS, IFF_UP
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            flags = struct.unpack("16sh", fcntl.ioctl(s, get_flags, struct.pack("16sh", b"lo", 0)))[1]
+            if not flags & up:
+                fcntl.ioctl(s, set_flags, struct.pack("16sh", b"lo", flags | up))
+    except OSError:
+        pass
+
+
 def main():
     path = sys.argv[1]
     report = os.environ.pop("RE_EXAMPLE_REPORT")
+    loopback_up()
     with open(path, encoding="utf-8") as f:
         source = f.read()
     code = 0

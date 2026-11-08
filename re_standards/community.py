@@ -11,6 +11,7 @@ import tomllib
 from pathlib import Path
 
 from . import data_path
+from . import readme
 from .readme import TEMPLATES
 from .tape import KIND_LABELS
 
@@ -27,8 +28,12 @@ def files(cfg: dict | None = None) -> tuple[dict[str, str], list[str]]:
     cfg = cfg or load_config()
     kinds = ", ".join(f"`{k}`" for k in KIND_LABELS)
 
+    brand = readme.load_config()                          # the mission and the disclosure, as the books' READMEs have them
+
     def fill(name: str) -> str:
         return ((COMMUNITY / name).read_text(encoding="utf-8").replace("{kinds}", kinds).replace("{standards}", cfg["standards"])
+                .replace("{mission}", brand["mission"]).replace("{free}", brand["free"])
+                .replace("{disclosure}", brand["disclosure"])
                 .replace("{site}", cfg["site"]).replace("{security_contact}", cfg.get("security_contact", ""))
                 .replace("{contributing}", cfg.get("contributing", "")))
     out = {

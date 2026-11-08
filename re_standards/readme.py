@@ -238,13 +238,19 @@ def licence_code(cfg: dict | None = None) -> str:
 
 
 def workflows(cfg: dict | None = None) -> dict[str, str]:
-    """Every book's .github/workflows: checks.yml runs the standards repository's book checks on each pull request, and
-    labels.yml reruns the kind-label check when labels change. Without them a pull request gets no checks, so it can
-    never be approved."""
+    """Every book's .github/workflows: checks.yml runs the standards repository's book checks on each pull request, the
+    examples its change could affect, and every example once a week ([workflows] weekly_cron); labels.yml reruns the
+    kind-label check when labels change. Without them a pull request gets no checks, so it can never be approved."""
     cfg = cfg or load_config()
     org = cfg["github"].rstrip("/").rsplit("/", 1)[-1]
-    return {f".github/workflows/{path.name}": path.read_text(encoding="utf-8").replace("{org}", org)
-            for path in sorted((TEMPLATES / "book" / "workflows").glob("*.yml"))}
+    fill = {"{org}": org, "{weekly_cron}": cfg["workflows"]["weekly_cron"]}
+    out = {}
+    for path in sorted((TEMPLATES / "book" / "workflows").glob("*.yml")):
+        text = path.read_text(encoding="utf-8")
+        for key, value in fill.items():
+            text = text.replace(key, value)
+        out[f".github/workflows/{path.name}"] = text
+    return out
 
 
 def files(book: Book, cfg: dict | None = None) -> dict[str, str]:

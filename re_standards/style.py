@@ -134,7 +134,51 @@ def _is_emoji(ch: str) -> bool:
     return unicodedata.category(ch) == "So" and ord(ch) > 0x2100
 
 
-def check_style(book: Book, cfg: dict | None = None) -> list[str]:
+RULE = re.compile(r"\bW-\d+(?=:)")
+RULE_ID = re.compile(r"^W-\d+$")
+
+
+LIMIT = re.compile(r"^([a-z_]+)=(\d+)(?:,(\d+))?$")
+
+
+def with_limits(cfg: dict, limits: list[str]) -> tuple[dict, list[str]]:
+    """The config with some of its [length] limits replaced, each given as "name=lo,hi" for a range (such as
+    chapter_words=1500,6000) or "name=n" for a single limit: a book whose own limits differ keeps the rest of the rule.
+    Returns the config and the problems with what was given."""
+    lengths, problems = dict(cfg["length"]), []
+    for given in limits:
+        m = LIMIT.match(given.strip())
+        name = m.group(1) if m else None
+        if not m or name not in lengths:
+            problems.append(f"--limit takes one of {', '.join(sorted(lengths))} as name=lo,hi or name=n, not {given!r}")
+            continue
+        lo, hi = int(m.group(2)), m.group(3)
+        if isinstance(lengths[name], list):
+            if hi is None or int(hi) < lo:
+                problems.append(f"--limit {name} is a range: {name}=lo,hi with lo at most hi")
+                continue
+            lengths[name] = [lo, int(hi)]
+        elif hi is not None:
+            problems.append(f"--limit {name} is one number: {name}=n")
+        else:
+            lengths[name] = lo
+    return dict(cfg, length=lengths), problems
+
+
+def rule_of(problem: str) -> str | None:
+    """The rule a problem names first, such as "W-7"."""
+    m = RULE.search(problem)
+    return m.group() if m else None
+
+
+def check_style(book: Book, cfg: dict | None = None, skip: set[str] | frozenset[str] = frozenset()) -> list[str]:
+    """Every problem the lint rules find, but those of the rules in `skip`: a book whose own rules leave one out, such
+    as a short book that doesn't keep W-7's lengths, passes without it."""
+    problems = _check_style(book, cfg)
+    return [p for p in problems if rule_of(p) not in skip] if skip else problems
+
+
+def _check_style(book: Book, cfg: dict | None = None) -> list[str]:
     cfg = cfg or load_config()
     problems: list[str] = []
     lengths, words = cfg["length"], cfg["words"]

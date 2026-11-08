@@ -1,5 +1,6 @@
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -231,3 +232,33 @@ def test_an_empty_base_commit_has_no_ids(tmp_path):
     git(repo, "add", "-A")
     git(repo, "commit", "-qm", "First edition")
     assert cli.main(["section-ids", "--book", str(repo), "--base-ref", "HEAD~1", "--previous", "none"]) == 0
+
+
+def test_a_runtime_is_built_without_the_callers_credentials(tmp_path, monkeypatch):
+    """The venv backend's build steps and the resolver install from the package index, where a package with no wheel
+    runs its own build code: they get the caller's environment without a key, a token or a password in it."""
+    caller = {"PATH": "/usr/bin", "HOME": "/home/someone", "UV_CACHE_DIR": "/cache/uv", "XDG_CACHE_HOME": "/cache",
+              "ANTHROPIC_API_KEY": "sk-ant-placeholder", "ANTHROPIC_BASE_URL": "http://127.0.0.1:8099",
+              "GITHUB_TOKEN": "placeholder", "RE_GCP_ACCESS_TOKEN": "placeholder", "MY_SERVICE_PASSWORD": "placeholder",
+              "AWS_SECRET_ACCESS_KEY": "placeholder", "SSH_AUTH_SOCK": "/tmp/agent", "CLAUDE_CODE_OAUTH_TOKEN": "x",
+              "UV_INDEX_URL": "https://user:pw@index.example.com/simple", "PIP_INDEX_URL": "https://pypi.org/simple",
+              "PWD": "/work", "KEYBOARD_LAYOUT": "us"}
+    env = examples.credential_free_env(caller)
+    assert env == {"PATH": "/usr/bin", "HOME": "/home/someone", "UV_CACHE_DIR": "/cache/uv", "XDG_CACHE_HOME": "/cache",
+                   "PIP_INDEX_URL": "https://pypi.org/simple", "PWD": "/work", "KEYBOARD_LAYOUT": "us"}
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-placeholder")
+    monkeypatch.setenv("RE_EXAMPLES_ENV_DIR", str(tmp_path / "envs"))
+    seen = []
+
+    def fake_run(cmd, **kw):
+        seen.append(kw.get("env"))
+        if "venv" in cmd:
+            Path(cmd[-1]).mkdir(parents=True)                      # uv venv makes the runtime's folder
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+    monkeypatch.setattr(examples.subprocess, "run", fake_run)
+    examples.VenvBackend(block_network=False).prepare(examples.Runtime("3.12.15", "six==1.16.0\n"))
+    assert len(seen) == 2 and all(e is not None and "ANTHROPIC_API_KEY" not in e for e in seen)
+    got = []
+    monkeypatch.setattr(examples.resolve, "check", lambda *a, **k: got.append(k.get("env")) or examples.resolve.Resolution("ok"))
+    examples.check_pins(examples.Runtime("3.12.16", "six==1.16.0\n"), examples.VenvBackend(block_network=False))
+    assert got and "ANTHROPIC_API_KEY" not in got[0]

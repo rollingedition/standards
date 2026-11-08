@@ -187,6 +187,32 @@ def _clean_env(extra: dict) -> dict:
     return env
 
 
+# What may hold a credential, by its variable's name: a word of the name (split at underscores), a prefix, or a whole
+# name. A URL with a user name or password in it counts too, whatever its variable is called.
+CREDENTIAL_WORDS = {"KEY", "KEYS", "APIKEY", "TOKEN", "TOKENS", "SECRET", "SECRETS", "PASSWORD", "PASSWORDS", "PASSWD",
+                    "PASS", "CREDENTIAL", "CREDENTIALS", "CREDS", "AUTH", "COOKIE", "COOKIES", "PRIVATE"}
+CREDENTIAL_PREFIXES = ("ANTHROPIC_", "CLAUDE_", "AWS_", "AZURE_", "GOOGLE_", "GCLOUD_", "CLOUDSDK_", "GCP_", "GH_",
+                       "GITHUB_", "GITLAB_", "OPENAI_", "STRIPE_", "FIREBASE_", "HF_", "HUGGING_FACE_", "NPM_", "TWINE_",
+                       "PYPI_", "GPG_", "SSH_", "VAULT_", "RE_GCP_", "RE_GITHUB_")
+CREDENTIAL_NAMES = {"NETRC", "KRB5CCNAME", "PGPASSFILE", "BOTO_CONFIG"}
+URL_WITH_USER = re.compile(r"://[^/\s@]+@")
+
+
+def holds_credential(name: str, value: str) -> bool:
+    upper = name.upper()
+    return (upper in CREDENTIAL_NAMES or upper.startswith(CREDENTIAL_PREFIXES)
+            or bool(CREDENTIAL_WORDS & set(upper.split("_"))) or bool(URL_WITH_USER.search(value or "")))
+
+
+def credential_free_env(environ: dict | None = None) -> dict[str, str]:
+    """The caller's environment without any variable that is, or may hold, a credential: what the venv backend builds a
+    runtime with and the resolver reads the pins with. Both install from the package index, and a package that has no
+    wheel runs its own build code, which never needs a key, a token or a password. An example itself never sees the
+    caller's environment at all (_clean_env)."""
+    source = os.environ if environ is None else environ
+    return {k: v for k, v in source.items() if not holds_credential(k, v)}
+
+
 class VenvBackend(Backend):
     name = "venv"
 
@@ -213,7 +239,7 @@ class VenvBackend(Backend):
             req.write_text(runtime.requirements)
             steps.append(uv + ["pip", "install", "--quiet", "--python", str(target / "bin" / "python"), "-r", str(req)])
         for step in steps:
-            r = subprocess.run(step, capture_output=True, text=True)
+            r = subprocess.run(step, capture_output=True, text=True, env=credential_free_env())
             if r.returncode != 0:
                 raise ExamplesError(f"could not build the pinned runtime: {r.stderr.strip()[-2000:]}")
         (target / ".ready").write_text(json.dumps(self.describe(runtime)))   # written last: the runtime is complete
@@ -346,22 +372,45 @@ def check_pins(runtime: Runtime, backend: Backend) -> resolve.Resolution | None:
     """The resolver's reading of the pins, when this backend is about to install them; None when it isn't."""
     if not backend.installs or not runtime.pins() or backend.ready(runtime):
         return None
-    found = resolve.check(runtime.python, runtime.requirements, runtime.pins())
+    found = resolve.check(runtime.python, runtime.requirements, runtime.pins(), env=credential_free_env())
     if found.outcome == "unsatisfiable":
         raise UnsatisfiablePins(found)
     return found
 
 
-def run_examples(book: Book, backend: Backend, timeout: float = 120, only: list[str] | None = None) -> tuple[list[ExampleResult], dict]:
+def run_examples(book: Book, backend: Backend, timeout: float = 120, only: list[str] | None = None,
+                 prepared: bool = False) -> tuple[list[ExampleResult], dict]:
+    """Every example, or those in `only`, in the pinned runtime. `prepared` says the caller has already read the pins and
+    built the runtime (as the choice of affected examples does, to read what it installs)."""
     runtime = read_runtime(book.root)
-    check_pins(runtime, backend)
-    backend.prepare(runtime)
+    if not prepared:
+        check_pins(runtime, backend)
+        backend.prepare(runtime)
     results = []
     for eid in sorted(book.examples):
         if only and eid not in only:
             continue
         results.append(run_one(book, eid, runtime, backend, timeout))
     return results, backend.describe(runtime)
+
+
+def installed(runtime: Runtime, backend: Backend, timeout: float = 120) -> dict:
+    """What the runtime has installed, read inside it by the harness (`--metadata`), with the network blocked as for an
+    example: each distribution's version, the names it can be imported as and what it requires, and the standard
+    library's module names. Only metadata is read: no package's code runs. The runtime must already be prepared."""
+    with tempfile.TemporaryDirectory(prefix="re-metadata-") as tmp:
+        work = Path(tmp) / "examples"
+        work.mkdir()
+        shutil.copy(HARNESS, work / ".re_harness.py")
+        cmd, env = backend.command(runtime, work, "--metadata")
+        try:
+            r = subprocess.run(cmd, cwd=work, env=env, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            raise ExamplesError(f"reading the runtime's installed packages took more than {timeout:g} seconds") from None
+        report = work / ".re_report.json"
+        if r.returncode != 0 or not report.exists():
+            raise ExamplesError(f"could not read the runtime's installed packages: {r.stderr.strip()[-500:] or r.returncode}")
+        return json.loads(report.read_text(encoding="utf-8"))
 
 
 def run_one(book: Book, eid: str, runtime: Runtime, backend: Backend, timeout: float) -> ExampleResult:

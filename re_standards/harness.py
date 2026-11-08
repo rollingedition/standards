@@ -4,6 +4,9 @@ Copied next to the examples and run as `python -I .re_harness.py EXAMPLE.py`. Th
 passes straight through; the report (Python version, the distributions it loaded and the ones it
 imports directly) goes to the file named by RE_EXAMPLE_REPORT. Standard library only, and it must run
 on every Python version a book may pin.
+
+`python -I .re_harness.py --metadata` runs no example: it reports what the runtime has installed (installed()), which
+the choice of the examples a change to the pins could affect reads (affected.py).
 """
 import ast
 import importlib.metadata as metadata
@@ -15,9 +18,56 @@ import runpy
 import sys
 import traceback
 
+METADATA = "--metadata"
+REQUIREMENT = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+
 
 def norm(name):
     return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def import_names(dist):
+    """The top-level names a distribution can be imported as: its top_level.txt and the top-level modules and packages
+    its RECORD lists, together. None when neither says, or when it installs a .pth file, which can put anything on
+    the path."""
+    import inspect                                  # only here: an example's run never loads more than it did
+    names = set()
+    text = dist.read_text("top_level.txt")
+    if text is not None:
+        names.update(line.strip() for line in text.splitlines() if line.strip())
+    files = dist.files
+    if files is None:
+        return sorted(names) if text is not None else None
+    for f in files:
+        parts = f.parts
+        if not parts or parts[0] in ("..", "__pycache__") or parts[0].endswith((".dist-info", ".egg-info", ".data")):
+            continue
+        if parts[-1].endswith(".pth"):
+            return None
+        if len(parts) > 1:
+            names.add(parts[0])
+        else:
+            module = inspect.getmodulename(parts[0])
+            if module:
+                names.add(module)
+    return sorted(names)
+
+
+def installed():
+    """What the runtime has installed: each distribution's version, its import names (import_names) and every
+    distribution it requires, whatever the markers and extras say, so a library that only sometimes uses another still
+    counts as using it. Also the standard library's module names, where this Python lists them."""
+    dists = {}
+    for dist in metadata.distributions():
+        name = dist.metadata["Name"]
+        if not name or norm(name) in dists:         # the first one on the path is the one an import finds
+            continue
+        requires = sorted({norm(m.group(1)) for r in (dist.requires or []) for m in [REQUIREMENT.match(r)] if m})
+        pth = any(f.parts and f.parts[-1].endswith(".pth") for f in dist.files or [])
+        dists[norm(name)] = {"version": dist.version, "imports": import_names(dist), "requires": requires, "pth": pth}
+    names = getattr(sys, "stdlib_module_names", None)
+    stdlib = sorted(set(names) | set(sys.builtin_module_names)) if names is not None else None
+    return {"python": platform.python_version(), "stdlib": stdlib, "distributions": dists}
 
 
 def _imported(source):
@@ -76,6 +126,10 @@ def loopback_up():
 def main():
     path = sys.argv[1]
     report = os.environ.pop("RE_EXAMPLE_REPORT")
+    if path == METADATA:
+        with open(report, "w", encoding="utf-8") as f:
+            json.dump(installed(), f)
+        return
     loopback_up()
     with open(path, encoding="utf-8") as f:
         source = f.read()

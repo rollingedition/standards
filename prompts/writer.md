@@ -19,6 +19,7 @@ Draft only with the model the model bar names for writing in `data/drafting.toml
 2. **Write each example first,** then the prose around it:
    - Examples live in `examples/{example_id}.py`. IDs are lowercase words joined by hyphens, unique in the book.
    - Shared setup goes in `examples/lib/`.
+   - Embed each example in the chapter where the prose discusses it, as a paragraph of its own holding only a link to it: `[Example: {example_id}](../examples/{example_id}.py)`. The page shows its code and output there. An example no chapter embeds fails `re-check section-ids`.
    - Each example prints what the prose discusses (W-21). Print each value the prose quotes on its own labelled line, such as `ndcg@10: 0.412`, so the prose can bind to it (W-26).
    - Data comes only from `examples/data/`. Model outputs come only from `examples/data/recorded/` (W-48). Examples never call a model or the network.
 3. **Run and record.** Run `re-check examples --book . --backend venv --only {ids} --record` to record outputs. Then run it again without `--record`: every example must pass.

@@ -1,5 +1,9 @@
 # The checks every book pull request runs. Book repos call this reusable workflow.
 # It runs with read-only permissions, no secrets and no deploy rights. Each job is one required status.
+#
+# `examples-scope` says which examples run: `all`, or `affected`, only those a change since the pull request's base could
+# affect, each with why (re-check examples --affected). The selection runs every example, and says why, whenever it
+# can't tell. A book's own workflow asks for `affected` on its pull requests and `all` on its weekly run.
 name: Book checks
 
 on:
@@ -9,6 +13,10 @@ on:
         description: The standards version whose checks run
         type: string
         default: v1
+      examples-scope:
+        description: Which examples run, all or affected (only those the pull request's change could affect)
+        type: string
+        default: all
 
 permissions:
   contents: read
@@ -19,7 +27,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
+      # With its history, so the affected examples can be told from the base commit.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/checkout@v4
         with:
           repository: rollingedition/standards
@@ -31,8 +42,18 @@ jobs:
       - name: Install the checks
         if: ${{ !env.RE_LOCAL }}
         run: pip install --quiet -e ./.standards
-      - name: Run every example in its pinned runtime and compare its output
-        run: re-check examples --book . --report "$RUNNER_TEMP/examples-report.json"
+      # The latest edition's record of what each example loaded adds examples, never removes one.
+      - name: Run the examples in their pinned runtime and compare their output
+        env:
+          SCOPE: ${{ inputs.examples-scope }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          case "$SCOPE" in
+            all) re-check examples --book . --report "$RUNNER_TEMP/examples-report.json" ;;
+            affected) re-check examples --book . --affected --base-ref "$BASE_SHA" \
+                        --recorded "${RE_PREVIOUS_SECTIONS:-latest}" --report "$RUNNER_TEMP/examples-report.json" ;;
+            *) echo "examples-scope is all or affected, not '$SCOPE'" >&2; exit 1 ;;
+          esac
 
   manifest:
     name: manifest

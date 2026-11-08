@@ -213,3 +213,46 @@ def test_the_renderer_marks_working_rules_only_when_asked(tmp_path):
             '</strong> Coerce, count, then decide.</p>') in marked
     assert '<strong class="working-rule-label">What to do<span' in marked and "<p><strong>Not a rule:</strong>" in marked
     assert marked.count('class="working-rule"') == 2
+
+
+def test_a_book_may_skip_rules_it_does_not_keep(tmp_path, capsys):
+    """A short book skips W-7's lengths and keeps every other rule; the command line takes the same list."""
+    from re_standards import cli
+    chapter = CHAPTER.replace(LONG + "\n\n[Example", "Short, and simply put.\n\n[Example")
+    book = book_with(tmp_path, chapter=chapter)
+    everything = style.check_style(book)
+    assert any("W-7: a chapter runs" in p for p in everything) and any("W-35" in p for p in everything)
+    kept = style.check_style(book, skip={"W-7"})
+    assert kept and not any(style.rule_of(p) == "W-7" for p in kept) and any("W-35" in p for p in kept)
+    assert style.rule_of("W-26: chapters/01.md:3: unresolved") == "W-26"
+    assert cli.main(["style", "--book", str(book.root), "--skip", "W-7"]) == 1        # W-35 still fails
+    out = capsys.readouterr()
+    assert "W-7" not in out.err and "W-35" in out.err
+    assert cli.main(["style", "--book", str(book.root), "--skip", "W-7,W-35", "--skip", "W-10"]) in (0, 1)
+    assert "W-35" not in capsys.readouterr().err
+    assert cli.main(["style", "--book", str(book.root), "--skip", "chapter length"]) == 1
+    assert "--skip takes rule IDs" in capsys.readouterr().err
+
+
+
+def test_a_book_may_keep_its_own_length_limits(tmp_path, capsys):
+    """A short book's chapter minimum, given on the command line: the rest of W-7 still applies."""
+    from re_standards import cli
+    words = lambda n: " ".join(["term"] * n)                       # noqa: E731
+    book = book_with(tmp_path, chapter=CHAPTER.replace(LONG, words(300), 1).replace(LONG, words(1000), 1))
+    cfg, wrong = style.with_limits(style.load_config(), ["chapter_words=1500,6000"])
+    assert not wrong and cfg["length"]["chapter_words"] == [1500, 6000] and cfg["length"]["section_words"] == [200, 900]
+    problems = style.check_style(book, cfg)
+    assert any("W-7: a chapter runs 1,500 to 6,000 words" in p for p in problems)      # 1,300-odd words: still short
+    assert any("W-7: a section runs 200 to 900 words" in p for p in problems)           # the section limit stays
+    longer = book_with(tmp_path / "b", chapter=CHAPTER.replace(LONG, words(700), 1).replace(LONG, words(800), 1))
+    kept = style.check_style(longer, cfg)
+    assert not any("a chapter runs" in p for p in kept)                                 # 1,500-odd words now pass
+    assert any("a chapter runs 3,000 to 6,000" in p for p in style.check_style(longer))  # and fail the standards' own
+    assert cli.main(["style", "--book", str(longer.root), "--limit", "chapter_words=1500,6000"]) == 1
+    out = capsys.readouterr()
+    assert "a chapter runs" not in out.err and "W-7: a book has 5 to 12 chapters" in out.err   # the rest of W-7 stays
+    for bad in ("chapter_words=1500", "pages=1,2", "chapter_words=6000,1500", "example_lines=1,2", "chapter words"):
+        assert cli.main(["style", "--book", str(longer.root), "--limit", bad]) == 1
+        assert "--limit" in capsys.readouterr().err
+    assert style.with_limits(style.load_config(), ["example_lines=50"])[0]["length"]["example_lines"] == 50

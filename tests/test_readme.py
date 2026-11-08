@@ -141,6 +141,27 @@ def test_every_book_carries_the_workflows_that_run_its_checks(tmp_path):
     assert readme.check(book) == [".github/workflows/labels.yml is missing; run re-check readme --write"]
 
 
+def test_pull_requests_run_the_affected_examples_and_every_example_runs_weekly(tmp_path):
+    """A pull request runs the examples its change could affect, against its base; a scheduled run once a week, and a
+    run by hand, run every example on main. The time comes from the config, so every book gets the same one."""
+    book = book_at(tmp_path)
+    readme.check(book, write=True)
+    checks = yaml.safe_load((book.root / ".github" / "workflows" / "checks.yml").read_text())
+    on = checks[True]                                       # PyYAML reads a bare `on:` key as True
+    assert on["pull_request"] == {"types": ["opened", "synchronize", "reopened"]}
+    assert on["schedule"] == [{"cron": readme.load_config()["workflows"]["weekly_cron"]}] and "workflow_dispatch" in on
+    assert checks["jobs"]["checks"]["with"] == {
+        "examples-scope": "${{ github.event_name == 'pull_request' && 'affected' || 'all' }}"}
+    cfg = readme.load_config()
+    cfg["workflows"]["weekly_cron"] = "0 6 * * 3"
+    assert '- cron: "0 6 * * 3"' in readme.workflows(cfg)[".github/workflows/checks.yml"]
+    assert readme.check(book, cfg=cfg) == [".github/workflows/checks.yml is out of date; run re-check readme --write"]
+    reusable = yaml.safe_load((readme.TEMPLATES.parent / ".github" / "workflows" / "book-checks.yml").read_text())
+    assert reusable[True]["workflow_call"]["inputs"]["examples-scope"] == {
+        "description": "Which examples run, all or affected (only those the pull request's change could affect)",
+        "type": "string", "default": "all"}                 # a caller that doesn't choose runs every example
+
+
 def test_recorded_outputs_are_described_in_words_true_of_every_book(tmp_path):
     book = book_at(tmp_path)
     assert "recorded once" not in readme.readme(book)                          # nothing recorded, nothing said

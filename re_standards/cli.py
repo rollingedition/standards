@@ -13,7 +13,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import addressed as addressed_check, bookfmt, catalog, checks, community, data_path, examples, readme, resolve, spoken, style
+from . import addressed as addressed_check, affected, bookfmt, catalog, checks, community, data_path, examples, readme, resolve, spoken, style
 
 
 def report(name: str, problems: list[str], ok_line: str, warn: bool = False) -> int:
@@ -116,21 +116,34 @@ def cmd_examples(args) -> int:
     book = bookfmt.load_book(Path(args.book))
     backend = examples.backend_named(args.backend or os.environ.get("RE_EXAMPLES_BACKEND", "container"),
                                      block_network=os.environ.get("RE_EXAMPLES_NETWORK", "blocked") == "blocked")
+    selection, chosen = None, {}
+    if (args.list or args.base_ref or args.recorded) and not args.affected:
+        return report("Examples", ["--list, --base-ref and --recorded go with --affected"], "")
     try:
-        results, runtime = examples.run_examples(book, backend, timeout=args.timeout,
-                                                 only=args.only.split(",") if args.only else None)
+        only, prepared = args.only.split(",") if args.only else None, False
+        if args.affected:
+            selection, prepared = affected.choose(book, args.base_ref, backend, args.recorded, timeout=args.timeout)
+            chosen = {"selection": selection.as_json()}
+            print("\n".join(selection.lines()))
+            only = None if selection.everything else selection.ids
+        if args.list or only == []:
+            results, runtime = [], (backend.describe(examples.read_runtime(book.root)) if only == [] else {})
+        else:
+            results, runtime = examples.run_examples(book, backend, timeout=args.timeout, only=only, prepared=prepared)
     except examples.UnsatisfiablePins as e:
         # Nothing was built and no example ran: a resolver's verdict, never an example's failure.
         found = e.resolution
         workflow_command("error", resolve.settings()["annotation"], found.explanation)
         write_report(args, {"outcome": "unsatisfiable", "resolver": found.as_json(), "runtime": runtime_or_none(book),
-                            "passing": 0, "total": len(book.examples), "examples": []})
+                            "passing": 0, "total": len(book.examples), "examples": [], **chosen})
         detail = "\n".join("      " + line for line in found.message.splitlines())
         return report("Examples", [f"{found.explanation}\n    The resolver ({found.tool}) says:\n{detail}"], "")
     except examples.ExamplesError as e:
         write_report(args, {"outcome": "error", "error": str(e), "runtime": runtime_or_none(book),
-                            "passing": 0, "total": len(book.examples), "examples": []})
+                            "passing": 0, "total": len(book.examples), "examples": [], **chosen})
         return report("Examples", [str(e)], "")
+    if args.list:
+        return 0
     problems = []
     for r in results:
         label = examples.describe_versions(r.versions, r.direct)
@@ -145,19 +158,36 @@ def cmd_examples(args) -> int:
     if not args.record:
         problems += book.output_problems
     outcome = "recorded" if args.record else ("passed" if not problems else "failed")
-    write_report(args, examples.results_json(results, runtime, outcome))
+    write_report(args, examples.results_json(results, runtime, outcome) | chosen)
     passing = sum(r.passing for r in results)
     where = f"Python {runtime['python']}, {runtime['backend']} runtime"
-    return report("Examples", problems, f"{passing} of {len(results)} examples pass ({where})" if not args.record
-                  else f"recorded the output of {len(results)} examples ({where})")
+    if args.record:
+        return report("Examples", problems, f"recorded the output of {len(results)} examples ({where})")
+    if selection and not selection.everything:
+        against = f"against {selection.base[:12]}"
+        if not results:
+            return report("Examples", problems, f"no example can be affected by this change, so none of "
+                          f"{selection.total} ran ({against})")
+        return report("Examples", problems, f"{passing} of {len(results)} affected examples pass; the other "
+                      f"{selection.total - len(results)} can't be affected by this change ({against}; {where})")
+    return report("Examples", problems, f"{passing} of {len(results)} examples pass ({where})")
 
 
 def cmd_style(args) -> int:
+    skip = {r.strip() for given in args.skip for r in given.split(",") if r.strip()}
+    if bad := sorted(r for r in skip if not style.RULE_ID.match(r)):
+        return report("Writing standards", [f"--skip takes rule IDs such as W-7, not {', '.join(map(repr, bad))}"], "")
+    cfg, wrong = style.with_limits(style.load_config(Path(args.config) if args.config else None), args.limit)
+    if wrong:
+        return report("Writing standards", wrong, "")
     book = bookfmt.load_book(Path(args.book))
-    problems = style.check_style(book, style.load_config(Path(args.config)) if args.config else None)
+    problems = style.check_style(book, cfg, skip=skip)
     words = sum(len(style.WORD.findall(t)) for c in book.chapters for _, t in style._prose_lines(c.body, c.body_offset))
+    skipped = f" (skipping {', '.join(sorted(skip))})" if skip else ""
+    skipped += f" (with {', '.join(args.limit)})" if args.limit else ""
     return report("Writing standards", problems,
-                  f"{len(book.chapters)} chapter(s), {words:,} words of prose: the lint rules of the writing standards pass")
+                  f"{len(book.chapters)} chapter(s), {words:,} words of prose: the lint rules of the writing standards pass"
+                  + skipped)
 
 
 def cmd_addressed(args) -> int:
@@ -232,13 +262,27 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--backend", choices=["venv", "container", "host"], help="default: $RE_EXAMPLES_BACKEND, else container")
     s.add_argument("--record", action="store_true", help="write each passing run's output as the expected output")
     s.add_argument("--report", help="write the results as JSON")
-    s.add_argument("--only", help="comma-separated example IDs")
+    which = s.add_mutually_exclusive_group()
+    which.add_argument("--only", help="comma-separated example IDs")
+    which.add_argument("--affected", action="store_true",
+                       help="run only the examples a change since --base-ref could affect, each with why, or every "
+                            "example when that can't be told, saying why")
+    s.add_argument("--base-ref", help="with --affected: the commit to compare with, such as a pull request's base")
+    s.add_argument("--recorded", help="with --affected: the last run's record, whose loaded libraries add examples: a "
+                                      "sections.json or a --report file, as a path or URL; `latest` for the latest "
+                                      "edition's; `none` for no record (the default)")
+    s.add_argument("--list", action="store_true", help="with --affected: print the selection and run nothing")
     s.add_argument("--timeout", type=float, default=120)
     s.set_defaults(fn=cmd_examples)
 
     s = sub.add_parser("style", help="the lint rules of the writing standards: lengths, time words, typed versions, bindings, banned words")
     s.add_argument("--book", default=".")
     s.add_argument("--config", help="writing.toml (default: this standards checkout)")
+    s.add_argument("--skip", action="append", default=[], metavar="RULE",
+                   help="a rule this book doesn't keep, such as W-7: repeat it, or separate rules with commas")
+    s.add_argument("--limit", action="append", default=[], metavar="NAME=LO,HI",
+                   help="one of writing.toml's [length] limits as this book keeps it, such as chapter_words=1500,6000: "
+                        "the rule's other limits stay; repeat it for more")
     s.set_defaults(fn=cmd_style)
 
     s = sub.add_parser("addressed", help="text written to an AI system: hidden characters, and phrases such as \"ignore previous "

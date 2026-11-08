@@ -4,6 +4,10 @@
 publisher = "Rolling Edition"
 about = "Rolling Edition publishes free technical books that AI drafts, people verify, and an automated pipeline keeps current."
 disclosure = "Written with AI. Verified by people."
+# The mission (the founder, Nov 8, 2026), in the sites' footers, on rollingedition.com/mission and on the organization's
+# GitHub page; and the line that goes beside it
+mission = "Working to keep technical knowledge open, current and verifiable."
+free = "Free to read, forever."
 draft_banner = "Draft: not yet published"     # on a draft's README; its first edition is published after agent review
 code_copyright = "Copyright (c) Rolling Edition and contributors"
 
@@ -29,6 +33,12 @@ preview_chapter = "/previews/{book}/{chapter_id}"
 [reuse]
 short = "Text is CC BY 4.0 and code is MIT. Credit Rolling Edition, link back to the book and to the licence, and say what you changed."
 full = "Book text is CC BY 4.0: credit Rolling Edition, link back to the book and to the licence, and say what you changed. Code examples are MIT: keep the notice “{copyright}” and the MIT terms with any code you copy."
+
+# A book's own check workflows (.github/workflows/, from templates/book/workflows/). A pull request runs only the
+# examples its change could affect; once a week, at this time (cron, UTC), every example runs again on main, which
+# catches what no change shows, such as a new build of the runtime's base image.
+[workflows]
+weekly_cron = "17 4 * * 1"
 
 [links]
 writing_standards = "https://github.com/rollingedition/standards/blob/main/writing/README.md"

@@ -4,9 +4,9 @@
 publisher = "Rolling Edition"
 about = "Rolling Edition publishes free technical books that AI drafts, people verify, and an automated pipeline keeps current."
 disclosure = "Written with AI. Verified by people."
-# The mission (the founder, Nov 8, 2026), in the sites' footers, on rollingedition.com/mission and on the organization's
+# The mission (the founder, Nov 8, 2026): it closes rollingedition.com's homepage, heads /mission and the organization's
 # GitHub page; and the line that goes beside it
-mission = "Working to keep technical knowledge open, current and verifiable."
+mission = "Keeping technical knowledge open, current and verifiable."
 free = "Free to read, forever."
 # The tagline (the founder, Nov 8, 2026): what the mission means for a reader. The homepage's headline, and the line
 # under the logo in the sites' footers; the mission, more formal, is on its own page and closes the homepage

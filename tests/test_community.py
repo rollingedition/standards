@@ -50,3 +50,4 @@ def test_the_repository_and_the_organization_get_a_readme(tmp_path):
     assert profile.startswith("# Rolling Edition") and "(https://rollingedition.com)" in profile
     assert "(https://github.com/rollingedition/.github/blob/main/CONTRIBUTING.md)" in profile and "{" not in profile + out["README.md"]
     assert "Written with AI. Verified by people." in profile
+    assert profile.rstrip().endswith("<sub>Patent pending</sub>")                   # the organization's page, at its foot

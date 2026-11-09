@@ -11,6 +11,10 @@ free = "Free to read, forever."
 # The tagline (the founder, Nov 8, 2026): what the mission means for a reader. The homepage's headline, and the line
 # under the logo in the sites' footers; the mission, more formal, is on its own page and closes the homepage
 tagline = "Your tools change. Our books keep up."
+# The patent notice (the founder, Nov 9, 2026, the day the provisional application was filed): beside the copyright in
+# the sites' footers, and at the foot of the organization's GitHub page. Not on the books' own READMEs: their text and
+# code are CC BY 4.0 and MIT, and a notice there could read as if the books themselves were patented
+patent = "Patent pending"
 draft_banner = "Draft: not yet published"     # on a draft's README; its first edition is published after agent review
 code_copyright = "Copyright (c) Rolling Edition and contributors"
 

@@ -10,7 +10,7 @@ mission = "Working to keep technical knowledge open, current and verifiable."
 free = "Free to read, forever."
 # The tagline (the founder, Nov 8, 2026): what the mission means for a reader. The homepage's headline, and the line
 # under the logo in the sites' footers; the mission, more formal, is on its own page and closes the homepage
-tagline = "Your tools change. Your book keeps up."
+tagline = "Your tools change. Our books keep up."
 draft_banner = "Draft: not yet published"     # on a draft's README; its first edition is published after agent review
 code_copyright = "Copyright (c) Rolling Edition and contributors"
 

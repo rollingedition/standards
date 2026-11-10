@@ -21,6 +21,7 @@ from pathlib import Path
 import yaml
 
 from . import data_path
+from . import models as model_files
 from .bookfmt import Book
 from .catalog import LEVELS
 
@@ -90,6 +91,9 @@ def readme(book: Book, cfg: dict | None = None) -> str:
     who = reader(m, cfg)
     first_example = next((e.example_id for c in book.chapters for e in c.embeds), None)
     python = (book.root / "examples" / ".python-version")
+    pins = book.root / "examples" / "requirements.txt"
+    # PyTorch's CPU index beside PyPI: uv takes each package from the first index that has it unless told otherwise
+    indexed = pins.exists() and any(line.strip().startswith("--extra-index-url") for line in pins.read_text().splitlines())
     data_cards = sorted(p.relative_to(book.root).as_posix() for p in (book.root / "examples" / "data").glob("*/README.md"))
     recorded = (book.root / "examples" / "data" / "recorded").is_dir()
     preview = m.get("status") == "draft"          # a draft: private, unpublished, with no cover, edition or pages yet
@@ -140,16 +144,27 @@ def readme(book: Book, cfg: dict | None = None) -> str:
         "",
         "```sh",
         f"uv venv --python {python.read_text().strip() if python.exists() else '3'}",
-        "uv pip install -r examples/requirements.txt",
+        "uv pip install -r examples/requirements.txt" + (" --index-strategy unsafe-best-match" if indexed else ""),
         f"cd examples && ../.venv/bin/python {first_example}.py" if first_example else "cd examples",
         "```",
         "",
     ]
+    pinned = model_files.read(book.root) if (book.root / model_files.MODELS).exists() else []
+    if pinned:
+        size = model_files.total_bytes(pinned) / 2**20
+        names = ", ".join(f"[{m.repo}](https://huggingface.co/{m.repo}/tree/{m.revision})" for m in pinned)
+        which = "an open model, pinned" if len(pinned) == 1 else f"{len(pinned)} open models, each pinned"
+        out += [f"The examples load {which} to an exact commit with every file's SHA-256 in `examples/models.toml`: "
+                f"{names}. The first run "
+                f"downloads {'it' if len(pinned) == 1 else 'them'} from Hugging Face (about {size:,.0f} MB); after that, "
+                "the examples run offline.", ""]
     if recorded:
         # The same words for every book: what a book records differs (embeddings, an LLM's judgments, a model it
-        # trains itself), so naming examples here would be untrue of some book.
+        # trains itself), so naming examples here would be untrue of some book. A book that also runs open models
+        # live says "hosted": its examples do load a model.
+        never = "never call a hosted model" if pinned else "never call a model"
         out += ["Model outputs are recorded once in `examples/data/recorded/`, each folder with a `manifest.json` that names "
-                "the model, its exact version and the script that recorded it, so the examples never call a model. "
+                f"the model, its exact version and the script that recorded it, so the examples {never}. "
                 "`recordings/` holds the scripts that record them again.", ""]
     if data_cards:
         out += ["Where the data comes from, and its licence: " + ", ".join(f"[`{p}`]({p})" for p in data_cards) + ".", ""]

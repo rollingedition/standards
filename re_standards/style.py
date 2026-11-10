@@ -189,6 +189,7 @@ def _check_style(book: Book, cfg: dict | None = None) -> list[str]:
     typed_version = [(name, re.compile(r"(?<![A-Za-z0-9\-])" + re.escape(alias) + r"(?:\s+version)?\s*(?:==\s*)?" + VERSION_NUMBER, re.IGNORECASE))
                      for name, aliases in names.items() for alias in aliases]
     proper = set(cfg["headings"]["proper_nouns"])
+    title_avoid = [(t, _phrase(t)) for t in cfg["headings"].get("chapter_title_avoid", [])]
 
     status = book.manifest.get("status", "draft")
     lo, hi = lengths["book_chapters"]
@@ -196,6 +197,11 @@ def _check_style(book: Book, cfg: dict | None = None) -> list[str]:
         problems.append(f"W-7: a book has {lo} to {hi} chapters; this one has {len(book.chapters)}")
 
     for c in book.chapters:
+        if status == "draft":                       # released books keep the titles they launched with
+            for term, rx in title_avoid:
+                if rx.search(c.title):
+                    problems.append(f"{c.file}: W-4: a chapter's title names what it builds, in the book's own terms; "
+                                    f"\"{term}\" could open any book (\"{c.title}\")")
         prose = _prose_lines(c.body, c.body_offset)
         total = sum(_words(t) for _, t in prose)
         lo, hi = lengths["chapter_words"]

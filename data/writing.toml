@@ -25,6 +25,8 @@ proper_nouns = ["Python", "BM25", "Wayfair", "WANDS", "Rolling", "Edition", "Eng
                 "Amazon", "Elasticsearch", "OpenSearch", "Solr", "Lucene", "Okapi", "TREC", "MS", "MARCO",
                 "LambdaMART", "RankNet", "LightGBM", "XGBoost", "SPLADE", "ColBERT", "HyDE", "RAG", "LLM", "LLMs",
                 "A/B", "I", "Bayes", "Markov", "Gaussian", "Fourier", "Jaccard", "Kendall", "Spearman", "Pearson"]
+# W-4: phrases a chapter's title never uses, checked while a book is drafted (released books keep their titles)
+chapter_title_avoid = ["end to end", "end-to-end"]
 
 [working_rule]                 # W-10: a section closes with a paragraph that opens with this label in bold
 label = "Working rule"
@@ -32,3 +34,11 @@ retired = ["What to do"]       # earlier labels: re-check style asks for the new
 
 [recordings]                   # W-48: every recorded output folder carries a manifest with these keys
 manifest = ["script", "model", "model_version", "prompt_sha256", "created", "outputs"]
+
+[skill]                        # W-57 to W-59: skill.md, beside book.toml, the hand-written part of the book's agent skill
+required_for = ["draft"]       # book statuses that fail without one; a live book without one gets a note
+description_max = 1024         # the Agent Skills format's limit for `description`
+max_lines = 400                # non-blank lines of procedures; the generated stamp and setup take the rest of SKILL.md's 500
+max_words = 3000               # about 4,000 tokens, inside the format's advice of 5,000 for a whole SKILL.md
+min_procedures = 1
+link_hosts = ["rollingedition.com", "rollingedition.ai"]   # besides the sources the chapters cite

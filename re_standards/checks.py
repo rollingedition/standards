@@ -52,12 +52,23 @@ def narration_only(paths: list[str]) -> bool:
     return bool(paths) and all(p.startswith(NARRATION_DIR) for p in paths)
 
 
+SKILL_FILE = "skill.md"           # the procedures of the book's agent skill, beside book.toml, never on the page
+
+
+def rides_along(paths: list[str]) -> bool:
+    """Whether a change touches nothing but files that ride with the next edition: the narration files and the agent
+    skill's procedures. Neither is on the page, so such a change needs no kind label and cuts no edition of its own.
+    (Adding skill.md where the last edition had none does cut one: the release checks that, since it knows the edition.)"""
+    return bool(paths) and all(p.startswith(NARRATION_DIR) or p == SKILL_FILE for p in paths)
+
+
 def check_kind_label(labels: list[str], changed: list[str] | None = None) -> list[str]:
-    """At least one kind: label, and no unknown ones. A pull request that changes only narration files (`changed`, the
-    paths it touches) needs none, since it changes nothing a reader sees on the page; an unknown one is still refused."""
+    """At least one kind: label, and no unknown ones. A pull request that changes only narration files or the agent
+    skill's procedures (`changed`, the paths it touches) needs none, since it changes nothing a reader sees on the page;
+    an unknown one is still refused."""
     kinds = [label for label in labels if label.startswith("kind:")]
     problems = [f"unknown label {label!r}; kind labels are {', '.join(KIND_LABELS)}" for label in kinds if label not in KIND_LABELS]
-    if not any(label in KIND_LABELS for label in kinds) and not narration_only(changed or []):
+    if not any(label in KIND_LABELS for label in kinds) and not rides_along(changed or []):
         problems.append(f"needs at least one kind label ({', '.join(KIND_LABELS)}) before it can merge")
     return problems
 

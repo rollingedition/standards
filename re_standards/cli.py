@@ -13,7 +13,8 @@ import os
 import sys
 from pathlib import Path
 
-from . import addressed as addressed_check, affected, bookfmt, catalog, checks, community, data_path, examples, readme, resolve, spoken, style
+from . import addressed as addressed_check, affected, bookfmt, catalog, checks, community, data_path, examples, readme, resolve, skill, spoken, style
+from . import models as model_files
 
 
 def report(name: str, problems: list[str], ok_line: str, warn: bool = False) -> int:
@@ -81,9 +82,9 @@ def cmd_kind_label(args) -> int:
     changed = checks.changed_from_event(Path(args.event), Path(args.book)) if args.event and args.book else None
     problems = checks.check_kind_label(labels, changed)
     kinds = [x for x in labels if x.startswith("kind:")]
-    if not kinds and checks.narration_only(changed or []):
-        ok = (f"only narration files changed ({', '.join(changed)}): no kind label needed, since the page doesn't "
-              "change; the change rides with the book's next edition")
+    if not kinds and checks.rides_along(changed or []):
+        ok = (f"only narration or the agent skill's procedures changed ({', '.join(changed)}): no kind label needed, "
+              "since the page doesn't change; the change rides with the book's next edition")
     else:
         ok = "kind labels: " + ", ".join(kinds)
     return report("Kind label", problems, ok)
@@ -109,7 +110,10 @@ def runtime_or_none(book) -> dict:
         rt = examples.read_runtime(book.root)
     except examples.ExamplesError:
         return {}
-    return {"python": rt.python, "key": rt.key, "requirements_sha256": hashlib.sha256(rt.requirements.encode()).hexdigest()}
+    out = {"python": rt.python, "key": rt.key, "requirements_sha256": hashlib.sha256(rt.requirements.encode()).hexdigest()}
+    if rt.models:
+        out["models_sha256"] = model_files.digest(rt.model_list())
+    return out
 
 
 def cmd_examples(args) -> int:
@@ -196,6 +200,16 @@ def cmd_addressed(args) -> int:
     return report("Text addressed to a model", problems, f"no text addressed to a model in {len(book.chapters)} chapter(s)")
 
 
+def cmd_skill(args) -> int:
+    book = bookfmt.load_book(Path(args.book))
+    problems, notes = skill.check(book, style.load_config(Path(args.config)) if args.config else None)
+    if not problems and notes:
+        return report("Agent skill", notes, "", warn=True)
+    found, _ = skill.read(book.root)
+    n = sum(1 for line in found.body.split("\n") if line.startswith("## ")) if found else 0
+    return report("Agent skill", problems, f"skill.md: {n} procedure(s), each citing the sections it comes from")
+
+
 def cmd_narration(args) -> int:
     book = bookfmt.load_book(Path(args.book))
     if args.chapter and args.chapter not in {c.chapter_id for c in book.chapters}:
@@ -217,6 +231,27 @@ def cmd_readme(args) -> int:
     problems = readme.check(book, write=args.write)
     return report("Front page", problems, "README.md, CITATION.cff, LICENSE, LICENSE-CODE, renovate.json and the check workflows are "
                   + ("written" if args.write else "up to date"))
+
+
+def cmd_models(args) -> int:
+    root = Path(args.book)
+    try:
+        current = model_files.read(root)
+        if args.pin:
+            split = lambda v: [x.strip() for x in v.split(",") if x.strip()] if v else None
+            new = model_files.pin(args.pin, revision=args.revision, files=split(args.files), include=split(args.include))
+            current = model_files.upsert(current, new)
+            text = model_files.to_toml(current)
+            model_files.parse(text)                 # what it writes must read back, licence and size cap included
+            (root / model_files.MODELS).write_text(text, encoding="utf-8")
+            print(f"pinned {new.repo} at {new.revision[:12]} ({new.licence}): {len(new.files)} files, "
+                  f"{sum(f.size for f in new.files) / 2**20:,.1f} MB")
+    except model_files.ModelsError as e:
+        return report("Models", [str(e)], "")
+    if not current:
+        return report("Models", [], f"no {model_files.MODELS}: the examples load no model")
+    return report("Models", [], f"{len(current)} model(s), {model_files.total_bytes(current) / 2**20:,.1f} MB, each at a "
+                  f"full commit with every file's SHA-256: {', '.join(m.repo for m in current)}")
 
 
 def cmd_licences(args) -> int:
@@ -291,6 +326,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--config", help="addressed.toml (default: this standards checkout)")
     s.set_defaults(fn=cmd_addressed)
 
+    s = sub.add_parser("skill", help="skill.md, the procedures of the book's agent skill: each cites its sections, links "
+                       "only to the book and the sources it cites, binds its versions, and fits the format")
+    s.add_argument("--book", default=".")
+    s.add_argument("--config", help="writing.toml (default: this standards checkout)")
+    s.set_defaults(fn=cmd_skill)
+
     s = sub.add_parser("narration", help="the spoken script: terms no rule reads, and examples, blocks and tables with no "
                        "description (warns; never fails, unless --strict)")
     s.add_argument("--book", default=".")
@@ -304,6 +345,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--book", default=".")
     s.add_argument("--write", action="store_true", help="regenerate the files instead of checking them")
     s.set_defaults(fn=cmd_readme)
+
+    s = sub.add_parser("models", help="the open model files the examples load (examples/models.toml); --pin writes one "
+                       "model's entry from Hugging Face (needs the internet)")
+    s.add_argument("--book", default=".")
+    s.add_argument("--pin", metavar="OWNER/NAME", help="pin this public model, or move it to --revision")
+    s.add_argument("--revision", default="main", help="a branch, tag or commit; the entry records the full commit")
+    s.add_argument("--files", help="comma-separated file names to pin, in place of the default patterns")
+    s.add_argument("--include", help="comma-separated patterns for top-level files, in place of [models] default_files")
+    s.set_defaults(fn=cmd_models)
 
     s = sub.add_parser("licences", help="this repository's own licences: LICENSE (MIT, the code) and LICENSE-TEXT (CC BY 4.0, writing/ and prompts/)")
     s.add_argument("--write", action="store_true", help="regenerate the files instead of checking them")

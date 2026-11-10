@@ -92,6 +92,20 @@ def test_title_case_headings_and_missing_alt_text(tmp_path):
     assert any("W-39" in p for p in problems)
 
 
+def test_a_drafted_chapter_title_never_says_end_to_end_and_a_released_one_keeps_its_title(tmp_path):
+    book = book_with(tmp_path, chapter=CHAPTER.replace("# First steps", "# Governance, end to end"))
+    assert not any("W-4" in p for p in lint(book))                          # the test book is live
+    book.manifest["status"] = "draft"
+    (problem,) = [p for p in lint(book) if "W-4" in p]
+    assert problem.startswith("chapters/01-first-steps.md: W-4:") and '"end to end"' in problem
+    book = book_with(tmp_path / "b", chapter=CHAPTER.replace("# First steps", "# End-to-end tests for a first agent"))
+    book.manifest["status"] = "draft"
+    assert any('"end-to-end"' in p for p in lint(book))
+    book = book_with(tmp_path / "c", chapter=CHAPTER.replace("# First steps", "# Predicting the next word"))
+    book.manifest["status"] = "draft"
+    assert not any("W-4" in p for p in lint(book))
+
+
 def test_lengths_long_examples_and_chapter_count(tmp_path):
     long_example = ("\n".join(f"x{i} = {i}" for i in range(45)) + '\nprint("unreadable amounts:", 1)\n', "unreadable amounts: 1\n")
     book = book_with(tmp_path, examples={"count": long_example})

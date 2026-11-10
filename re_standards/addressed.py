@@ -198,6 +198,14 @@ def check_addressed(book: Book, cfg: dict | None = None) -> list[str]:
     problems = scan_hidden_characters(book.root, rules)
     for c in book.chapters:
         problems += check_chapter(c.file, c.body, c.body_offset, rules)
+    skill = book.root / "skill.md"                   # the procedures someone else's agent follows
+    if skill.is_file():
+        from .bookfmt import split_front_matter
+        front, body, offset, _ = split_front_matter(skill.read_text(encoding="utf-8", errors="replace"))
+        problems += check_chapter("skill.md", body, offset, rules)
+        for at, rid, hit in rules.hits(str(front.get("description") or "")):
+            problems.append(f"skill.md: description: {rid}: \"{_excerpt(hit)}\"; an agent reads this to decide when to "
+                            "use the skill")
     manifest = book.root / "book.toml"
     if manifest.is_file():
         text = manifest.read_text(encoding="utf-8", errors="replace")

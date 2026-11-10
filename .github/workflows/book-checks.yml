@@ -78,6 +78,8 @@ jobs:
         run: re-check readme --book .
       - name: Check the book for text addressed to an AI system
         run: re-check addressed --book .
+      - name: Check the agent skill's procedures
+        run: re-check skill --book .
 
   section-ids:
     name: section-ids

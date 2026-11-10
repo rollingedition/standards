@@ -11,3 +11,24 @@ python_platform = "x86_64-manylinux_2_36"
 # job reads it to tell this outcome from a failing example.
 annotation = "The pins can't be installed together"
 timeout_seconds = 180
+
+# Open model files a book pins in examples/models.toml (models.py): fetched once when a runtime is built, each file's
+# SHA-256 checked, then loaded offline from a Hugging Face cache at the pinned commit. `re-check models --pin` writes them.
+[models]
+base_url = "https://huggingface.co"
+# The Lab's images carry the weights, so they ship like everything else in a book: only licences as open as
+# CC BY 4.0, never custom terms, non-commercial or share-alike.
+licences = ["apache-2.0", "mit", "bsd-2-clause", "bsd-3-clause", "cc0-1.0", "cc-by-4.0"]
+max_total_mb = 4096
+# The files `--pin` takes when none are named: the top-level files a transformers model loads.
+default_files = ["*.json", "*.safetensors", "*.txt", "*.model", "*.jinja", "*.tiktoken"]
+# ... less what training leaves behind, which no model loads
+skip_files = ["*_results.json", "trainer_state.json", "training_args.json"]
+# Where a container image keeps them, readable by any user. A venv keeps them in its runtime's folder, under hf/.
+image_cache = "/opt/re/hf"
+
+# Package indexes a book's examples/requirements.txt may add, as a line `--extra-index-url URL`, beside PyPI. PyTorch's
+# CPU builds (torch==X+cpu) live only on its own index, and the PyPI build brings gigabytes of GPU libraries that no
+# runtime here can use. The pins stay exact; uv then reads every index for the best match, as pip does.
+[runtime]
+extra_indexes = ["https://download.pytorch.org/whl/cpu"]

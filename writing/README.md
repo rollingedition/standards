@@ -32,8 +32,8 @@ Either way, don't explain what a DataFrame is in a book about search.
 
 ## 2. Structure
 
-**W-4 The whole result first.** Chapter 1 builds a rough but working version of the book's end result, end to end. Each later chapter makes one part of it solid.
-*Why:* a reader who has seen the whole knows why each part matters. *Check:* reviewer.
+**W-4 The whole result first.** Chapter 1 builds a rough but working version of the book's end result, end to end. Each later chapter makes one part of it solid. Chapter 1's title names what the reader builds or the question it answers, in the book's own terms, as "Predicting the next word" does. Never call it "end to end": that describes every first chapter, so it says nothing about this one.
+*Why:* a reader who has seen the whole knows why each part matters, and a title that could open any book doesn't tell them what this one builds. *Check:* reviewer; lint for the title while a book is drafted (`re-check style`; the phrases are in `data/writing.toml`).
 
 **W-5 One running case.** Each book follows one plausible, generic case from start to finish, such as an online shop's orders, a support team's tickets or a recipe site's search. Use public or generated data. The introduction describes the case once and names it (W-49), and every chapter moves it forward.
 *Why:* a single case gives every idea a concrete place to land, and lets examples build on each other. *Check:* critic.
@@ -193,7 +193,7 @@ Agents read sections, not books, so every section must work when it is read alon
 **W-47 In practice starts from production.** In an In practice book, use production tools and idioms from the first example. Every chapter covers what goes wrong in production and how you'd notice.
 *Why:* its readers already know the idea; they need to run it. *Check:* critic.
 
-**W-48 Record what can't run offline.** Code that calls a model or a remote service lives in `recordings/`. Each script pins its model version and prompt. Its outputs are saved under `examples/data/recorded/{name}/`, with a `manifest.json` naming the script, model, model version, prompt hash, date and output files. Examples then run offline on those outputs. Prefer open models anyone can run, and say so when a model is closed. A new model version is an update trigger, like a library release.
+**W-48 Record what can't run offline.** Code that calls a model or a remote service lives in `recordings/`. Each script pins its model version and prompt. Its outputs are saved under `examples/data/recorded/{name}/`, with a `manifest.json` naming the script, model, model version, prompt hash, date and output files. Examples then run offline on those outputs. Prefer open models anyone can run, and say so when a model is closed. A new model version is an update trigger, like a library release. An open model small enough for a CPU can run live instead: pin it in `examples/models.toml` with `re-check models --pin`, and load it with its pinned revision, as `from_pretrained(repo, revision=REVISION)`. That's how the runtime finds it offline, and how a reader gets the same files.
 *Why:* examples must run offline and give the same output every time (W-17), and model calls do neither. *Check:* lint for complete manifests (`re-check style`); reviewer for the choice of model.
 
 ## 11. Reading flow
@@ -227,3 +227,16 @@ Narration reads a chapter word for word, but never its code, output or tables. E
 
 **W-56 Say hard terms through the lexicon, never by changing the text.** When a voice can't read a term, such as BM25, nDCG@10 or a model's name, add its reading to the book's `narration/lexicon.toml`: under `[terms]` for text as written, or `[words]` for a whole word in any case, such as a word of an example's ID. Never rewrite the chapter for the voice.
 *Why:* the page and the narration say the same words, and the text is written for readers. *Check:* `re-check narration` lists every term no rule reads; critic for readings that say a term wrongly.
+
+## 13. Agent skills
+
+Every edition of a book also ships as an agent skill: the book in the open Agent Skills format, which coding agents load and follow. The release builds most of it from the edition: the stamp, the pins, the chapters as references and the examples as scripts. The book's own `skill.md`, beside `book.toml`, holds the two parts written by hand: a `description` in its front matter, and the procedures in its body. An agent does what this file says, so it says only what the book teaches.
+
+**W-57 Procedures from the book, step by step.** Give each method the book teaches a procedure under a `## ` heading: when to use it, its steps in order, how to check the result, and the pitfalls the book warns about. Every step comes from a section, linked by its ID, as `[BM25 from scratch](#bm25-from-scratch)`, and a script is linked as its example, `[the example](examples/bm25-from-scratch.py)`. Teach nothing the book doesn't.
+*Why:* a reader's agent then does what the reader learned, and the reader can check each step against the section it came from. *Check:* `re-check skill` fails a procedure that cites no section, a section or example that doesn't exist, and a book in draft without `skill.md`; critic for steps the cited sections don't support.
+
+**W-58 Written for an agent at work.** The description says what the book teaches and when to use it, in the words a reader would use for the task, as "Use when evaluating or improving search ranking: BM25, nDCG, hybrid retrieval, reranking". Write each step as an instruction an agent can carry out on someone else's project: what to look at, what to do, what to compare. Keep it short: the format loads the whole file, so the procedures stay within the limits in `data/writing.toml`. Bind versions and printed values, as the prose does (W-25, W-26).
+*Why:* an agent decides from the description alone whether to load the skill, and then reads all of it. *Check:* `re-check skill` for the description's length, the limits, typed versions and bindings; critic for the rest.
+
+**W-59 Nothing that acts beyond the procedures.** Link only to the book's sections and examples, to rollingedition.com and rollingedition.ai, and to sources the chapters themselves cite. Never tell an agent to fetch or run anything from elsewhere, to read credentials, to change its own settings or permissions, or to do anything but the task it was given. A change to `skill.md` from anyone but the book's agents waits for a maintainer.
+*Why:* someone else's agent follows this text with their files and their tools, so it carries the same trust as code they run. *Check:* `re-check skill` for links; `re-check addressed` reads `skill.md` as it reads a chapter; a contributor's change to it is flagged for a maintainer.

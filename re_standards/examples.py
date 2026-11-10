@@ -1,9 +1,10 @@
 """Run every example in a book's pinned runtime and compare its output: the first check on every book pull request.
 
-The pinned runtime is two files in the book repo:
+The pinned runtime is two files in the book repo, and a third for a book whose examples load open models:
 
     examples/.python-version     an exact Python version, such as 3.12.15
     examples/requirements.txt    exact pins, such as pandas==2.2.3
+    examples/models.toml         open model files, each at a full commit with its SHA-256 (models.py)
 
 Backends build that runtime differently:
 
@@ -36,12 +37,22 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from . import resolve
+from . import models as model_files, resolve
 from .bookfmt import Book
 
 HARNESS = Path(__file__).with_name("harness.py")
 DOCKERFILE = Path(__file__).resolve().parent.parent / "runtime" / "Dockerfile"
+MODELS_DOCKERFILE = DOCKERFILE.with_name("models.Dockerfile")
+FETCH_MODELS = Path(__file__).with_name("fetch_models.py")
 PIN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s;#]+)")
+INDEX = re.compile(r"^--extra-index-url\s+(\S+)$")     # an index beside PyPI, from [runtime] extra_indexes only
+BEST_MATCH = ["--index-strategy", "unsafe-best-match"]   # with an extra index, uv reads all of them, as pip does
+
+
+def extra_indexes_allowed() -> list[str]:
+    import tomllib
+    from . import data_path
+    return tomllib.loads(data_path("examples.toml").read_text(encoding="utf-8"))["runtime"]["extra_indexes"]
 
 
 class ExamplesError(RuntimeError):
@@ -60,11 +71,22 @@ class UnsatisfiablePins(ExamplesError):
 class Runtime:
     python: str
     requirements: str
+    models: str = ""            # examples/models.toml's text, or "" for a book that loads no model
 
     @property
     def key(self) -> str:
-        h = hashlib.sha256(f"{self.python}\n{self.requirements}".encode()).hexdigest()
-        return h[:16]
+        """The pins' hash, and the models' too when there are any: a runtime without models keeps the key it had."""
+        text = f"{self.python}\n{self.requirements}"
+        if self.models:
+            text += "\n" + model_files.canonical(self.model_list())
+        return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+    def model_list(self) -> list[model_files.Model]:
+        return model_files.parse(self.models) if self.models else []
+
+    def indexes(self) -> list[str]:
+        """The package indexes the pins add beside PyPI."""
+        return [m.group(1) for line in self.requirements.splitlines() if (m := INDEX.match(line.split("#")[0].strip()))]
 
     def pins(self) -> dict[str, str]:
         out = {}
@@ -84,11 +106,26 @@ def read_runtime(book_root: Path) -> Runtime:
     if not re.fullmatch(r"3\.\d+\.\d+", python):
         raise ExamplesError(f"examples/.python-version must be an exact version like 3.12.15, not {python!r}")
     requirements = req.read_text() if req.exists() else ""
+    allowed = None
     for line in requirements.splitlines():
         line = line.split("#")[0].strip()
+        index = INDEX.match(line)
+        if index:
+            allowed = allowed if allowed is not None else extra_indexes_allowed()
+            if index.group(1).rstrip("/") not in [a.rstrip("/") for a in allowed]:
+                raise ExamplesError(f"examples/requirements.txt: {index.group(1)} isn't an index a book may use; "
+                                    f"allowed: {', '.join(allowed)}")
+            continue
         if line and not PIN.match(line):
             raise ExamplesError(f"examples/requirements.txt: {line!r} is not pinned to an exact version (name==version)")
-    return Runtime(python, requirements)
+    pinned = Path(book_root) / model_files.MODELS
+    models = pinned.read_text(encoding="utf-8") if pinned.exists() else ""
+    if models:
+        try:
+            model_files.parse(models)
+        except model_files.ModelsError as e:
+            raise ExamplesError(str(e)) from None
+    return Runtime(python, requirements, models)
 
 
 @dataclass
@@ -160,8 +197,11 @@ class Backend:
         raise NotImplementedError
 
     def describe(self, runtime: Runtime) -> dict:
-        return {"backend": self.name, "python": runtime.python, "key": runtime.key,
-                "requirements_sha256": hashlib.sha256(runtime.requirements.encode()).hexdigest()}
+        out = {"backend": self.name, "python": runtime.python, "key": runtime.key,
+               "requirements_sha256": hashlib.sha256(runtime.requirements.encode()).hexdigest()}
+        if runtime.models:
+            out["models_sha256"] = model_files.digest(runtime.model_list())
+        return out
 
 
 THREAD_VARS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
@@ -237,12 +277,22 @@ class VenvBackend(Backend):
         if runtime.pins():
             req = target.parent / f"{target.name}.requirements.txt"
             req.write_text(runtime.requirements)
-            steps.append(uv + ["pip", "install", "--quiet", "--python", str(target / "bin" / "python"), "-r", str(req)])
+            steps.append(uv + ["pip", "install", "--quiet", "--python", str(target / "bin" / "python"), "-r", str(req),
+                               *(BEST_MATCH if runtime.indexes() else [])])
         for step in steps:
             r = subprocess.run(step, capture_output=True, text=True, env=credential_free_env())
             if r.returncode != 0:
                 raise ExamplesError(f"could not build the pinned runtime: {r.stderr.strip()[-2000:]}")
+        if runtime.models:
+            try:
+                model_files.fetch(runtime.model_list(), self.models_dir(runtime))
+            except (OSError, ValueError) as e:
+                raise ExamplesError(f"could not fetch the pinned model files: {e}") from None
         (target / ".ready").write_text(json.dumps(self.describe(runtime)))   # written last: the runtime is complete
+
+    def models_dir(self, runtime: Runtime) -> Path:
+        """The runtime's Hugging Face cache, beside its venv: where its examples find their models offline."""
+        return self.env_dir(runtime) / "hf"
 
     def command(self, runtime: Runtime, workdir: Path, example: str) -> tuple[list[str], dict]:
         python = self.env_dir(runtime) / "bin" / "python"
@@ -253,7 +303,8 @@ class VenvBackend(Backend):
                                     "unprivileged user namespaces are restricted). Use the container backend, or set "
                                     "RE_EXAMPLES_ALLOW_NETWORK=1 to run with the network open, for local use only")
             cmd = ["unshare", "-rn"] + cmd
-        return cmd, _clean_env({"HOME": str(workdir), "RE_EXAMPLE_REPORT": str(workdir / ".re_report.json")})
+        extra = model_files.env(self.models_dir(runtime)) if runtime.models else {}
+        return cmd, _clean_env({"HOME": str(workdir), "RE_EXAMPLE_REPORT": str(workdir / ".re_report.json"), **extra})
 
     def describe(self, runtime: Runtime) -> dict:
         return dict(super().describe(runtime), network="blocked" if self.block_network else "open")
@@ -273,6 +324,14 @@ def dockerfile_key() -> str:
     """The runtime Dockerfile's own hash: an image is built from it as well as from the pins, so a changed
     Dockerfile gets new images rather than a cached one built from the old file."""
     return hashlib.sha256(DOCKERFILE.read_bytes()).hexdigest()[:8]
+
+
+def models_dockerfile_key() -> str:
+    """For a runtime with models: the hash of both image definitions and the fetch, which build its image together."""
+    h = hashlib.sha256()
+    for path in (DOCKERFILE, MODELS_DOCKERFILE, FETCH_MODELS):
+        h.update(path.read_bytes() + b"\0")
+    return h.hexdigest()[:8]
 
 
 class ContainerBackend(Backend):
@@ -296,8 +355,10 @@ class ContainerBackend(Backend):
         self.registry = (os.environ.get("RE_EXAMPLES_REGISTRY", "") if registry is None else registry).strip().rstrip("/")
 
     def tag(self, runtime: Runtime) -> str:
-        """The image's name without a registry: the same locally and in CI, so it's what a description records."""
-        return f"{self.repository}:py{runtime.python}-{runtime.key}-{dockerfile_key()}"
+        """The image's name without a registry: the same locally and in CI, so it's what a description records. Its
+        last part is the image definition's hash, which affected.py compares between runs."""
+        definition = models_dockerfile_key() if runtime.models else dockerfile_key()
+        return f"{self.repository}:py{runtime.python}-{runtime.key}-{definition}"
 
     def image(self, runtime: Runtime) -> str:
         """The image as the engine names it: pulled from, pushed to and run from the registry when there is one."""
@@ -307,8 +368,19 @@ class ContainerBackend(Backend):
         return [self.engine, "pull", "--quiet", self.image(runtime)]
 
     def build_command(self, runtime: Runtime, context: Path) -> list[str]:
+        """The pins' image. For a runtime with models, the base that models_build_command's layer goes on."""
+        target = self.base_image(runtime) if runtime.models else self.image(runtime)
         return [self.engine, "build", "--quiet", "-f", str(DOCKERFILE), "--build-arg", f"PYTHON_VERSION={runtime.python}",
-                "-t", self.image(runtime), str(context)]
+                "-t", target, str(context)]
+
+    def base_image(self, runtime: Runtime) -> str:
+        """A local name for the pins' image under a runtime with models: built, never pushed."""
+        return f"{self.repository}-base:py{runtime.python}-{runtime.key}-{dockerfile_key()}"
+
+    def models_build_command(self, runtime: Runtime, context: Path) -> list[str]:
+        return [self.engine, "build", "--quiet", "-f", str(MODELS_DOCKERFILE), "--build-arg", f"BASE={self.base_image(runtime)}",
+                "--build-arg", f"BASE_URL={model_files.settings()['base_url']}",
+                "--build-arg", f"CACHE={model_files.settings()['image_cache']}", "-t", self.image(runtime), str(context)]
 
     def push_command(self, runtime: Runtime) -> list[str]:
         return [self.engine, "push", "--quiet", self.image(runtime)]
@@ -321,6 +393,13 @@ class ContainerBackend(Backend):
             r = subprocess.run(self.build_command(runtime, Path(tmp)), capture_output=True, text=True)
             if r.returncode != 0:
                 raise ExamplesError(f"could not build the example image: {build_failure(r.stderr)}")
+        if runtime.models:
+            with tempfile.TemporaryDirectory() as tmp:
+                (Path(tmp) / "models.json").write_text(json.dumps([m.as_json() for m in runtime.model_list()]))
+                shutil.copy(FETCH_MODELS, Path(tmp) / "fetch_models.py")
+                r = subprocess.run(self.models_build_command(runtime, Path(tmp)), capture_output=True, text=True)
+                if r.returncode != 0:
+                    raise ExamplesError(f"could not add the pinned model files to the example image: {r.stderr.strip()[-2000:]}")
         if self.registry:
             r = subprocess.run(self.push_command(runtime), capture_output=True, text=True)
             if r.returncode != 0:
@@ -328,7 +407,8 @@ class ContainerBackend(Backend):
                       f"{r.stderr.strip()[-500:]}", file=sys.stderr)
 
     def command(self, runtime: Runtime, workdir: Path, example: str) -> tuple[list[str], dict]:
-        inside = {k: v for k, v in _clean_env({"HOME": "/work", "RE_EXAMPLE_REPORT": "/work/.re_report.json"}).items()
+        extra = model_files.env(model_files.settings()["image_cache"]) if runtime.models else {}
+        inside = {k: v for k, v in _clean_env({"HOME": "/work", "RE_EXAMPLE_REPORT": "/work/.re_report.json", **extra}).items()
                   if k != "PATH"}               # the image's own PATH finds its Python
         user = ["--user", f"{os.getuid()}:{os.getgid()}"] if hasattr(os, "getuid") else []
         return [self.engine, "run", "--rm", "--network", "none", *user, "-v", f"{workdir}:/work", "-w", "/work",
@@ -372,7 +452,8 @@ def check_pins(runtime: Runtime, backend: Backend) -> resolve.Resolution | None:
     """The resolver's reading of the pins, when this backend is about to install them; None when it isn't."""
     if not backend.installs or not runtime.pins() or backend.ready(runtime):
         return None
-    found = resolve.check(runtime.python, runtime.requirements, runtime.pins(), env=credential_free_env())
+    found = resolve.check(runtime.python, runtime.requirements, runtime.pins(), env=credential_free_env(),
+                          extra_args=BEST_MATCH if runtime.indexes() else None)
     if found.outcome == "unsatisfiable":
         raise UnsatisfiablePins(found)
     return found

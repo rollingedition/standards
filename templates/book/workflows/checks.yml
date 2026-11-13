@@ -1,5 +1,6 @@
 # The shared book checks from the standards repository. A pull request runs the examples its change could affect,
 # against its base, and every week every example runs again on main, whatever changed, as it can also be run by hand.
+# The weekly run's time is drawn from the book's name, so the books' runs don't all start at once.
 name: Checks
 
 on:

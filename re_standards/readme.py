@@ -8,11 +8,18 @@ every book: among other things, it holds a new library release back until it is 
 badge and latest cover, so it doesn't change at every release. `re-check readme` fails when a file is
 out of date; `--write` regenerates them. `re-check licences` does the same for this repository's own licences.
 
+A released book's workflows are the exception. A change under .github/ waits for a maintainer, and the agent that
+regenerates a pull request's front page never writes them, so when their templates change, a released book takes the
+new ones through one maintainer-approved pull request (`re retrofit workflows` opens one in every book). Until it
+merges, `re-check readme` warns that they're out of date and doesn't fail, so none of the book's other pull requests
+waits for it. A draft's are written at its launch, and fail the check when they're out of date.
+
 The wording follows open verification: agents publish, anyone checks or corrects, and only serious
 risks wait for a person. It never says that a person approved anything.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import tomllib
@@ -171,7 +178,8 @@ def readme(book: Book, cfg: dict | None = None) -> str:
     out += [
         "## How this book stays current",
         "",
-        "When a library this book uses releases a new version, every example runs again in the new version. Agents draft "
+        "When a library this book uses releases a new version, the examples that use it run again in the new version, "
+        "and every example runs again each week. Agents draft "
         "any fix and check every change, and a change merges once its checks pass; one with a serious risk, such as a "
         "security or copyright problem, waits for a Rolling Edition maintainer. Anyone can check the book or correct it "
         "with a pull request. Each new edition is stamped with its date, its examples passing and what changed."
@@ -252,13 +260,29 @@ def licence_code(cfg: dict | None = None) -> str:
                                                                                   cfg["code_copyright"])
 
 
-def workflows(cfg: dict | None = None) -> dict[str, str]:
+def weekly_cron(slug: str, cfg: dict | None = None) -> str:
+    """When a book's weekly run of every example starts: [workflows] weekly_cron, its minute, hour and day of the week
+    drawn from a hash of the book's slug, so the books' runs don't all start at once. The minute stays clear of the
+    hour's first minutes ([workflows] weekly_minutes), when GitHub's scheduled runs are busiest. Never typed: the same
+    slug always gives the same time."""
+    cfg = cfg or load_config()
+    w = cfg["workflows"]
+    first, last = w["weekly_minutes"]
+    n = int.from_bytes(hashlib.sha256(slug.encode()).digest()[:8], "big")
+    minute = first + n % (last - first + 1)
+    n //= last - first + 1
+    hour, weekday = n % 24, (n // 24) % 7
+    return w["weekly_cron"].format(minute=minute, hour=hour, weekday=weekday)
+
+
+def workflows(cfg: dict | None = None, slug: str = "") -> dict[str, str]:
     """Every book's .github/workflows: checks.yml runs the standards repository's book checks on each pull request, the
-    examples its change could affect, and every example once a week ([workflows] weekly_cron); labels.yml reruns the
-    kind-label check when labels change. Without them a pull request gets no checks, so it can never be approved."""
+    examples its change could affect, and every example once a week, at a time drawn from the book's slug
+    (weekly_cron); labels.yml reruns the kind-label check when labels change. Without them a pull request gets no
+    checks, so it can never be approved."""
     cfg = cfg or load_config()
     org = cfg["github"].rstrip("/").rsplit("/", 1)[-1]
-    fill = {"{org}": org, "{weekly_cron}": cfg["workflows"]["weekly_cron"]}
+    fill = {"{org}": org, "{weekly_cron}": weekly_cron(slug, cfg)}
     out = {}
     for path in sorted((TEMPLATES / "book" / "workflows").glob("*.yml")):
         text = path.read_text(encoding="utf-8")
@@ -268,11 +292,20 @@ def workflows(cfg: dict | None = None) -> dict[str, str]:
     return out
 
 
+MAINTAINED = ".github/"            # generated files that change on a released book only with a maintainer's approval
+FRONT_PAGE = ("README.md", "CITATION.cff", "LICENSE", "LICENSE-CODE", "renovate.json")
+
+
+def generated_names() -> set[str]:
+    """The paths `files` writes in every book: the front page, the licences, renovate.json and the workflows."""
+    return set(FRONT_PAGE) | {f"{MAINTAINED}workflows/{p.name}" for p in (TEMPLATES / "book" / "workflows").glob("*.yml")}
+
+
 def files(book: Book, cfg: dict | None = None) -> dict[str, str]:
     cfg = cfg or load_config()
     return {"README.md": readme(book, cfg), "CITATION.cff": citation(book, cfg),
             "LICENSE": (TEMPLATES / "licenses" / "CC-BY-4.0.txt").read_text(encoding="utf-8"), "LICENSE-CODE": licence_code(cfg),
-            "renovate.json": renovate(), **workflows(cfg)}
+            "renovate.json": renovate(), **workflows(cfg, book.slug)}
 
 
 def own_licences(cfg: dict | None = None) -> dict[str, str]:
@@ -299,6 +332,21 @@ def sync(root: Path, texts: dict[str, str], command: str, write: bool = False) -
 def check(book: Book, write: bool = False, cfg: dict | None = None) -> list[str]:
     """Problems with the generated files, or none after writing them."""
     return sync(book.root, files(book, cfg), "re-check readme", write)
+
+
+def released(book: Book) -> bool:
+    return book.manifest.get("status", "draft") != "draft"
+
+
+def held_for_maintainer(book: Book, problems: list[str]) -> tuple[list[str], list[str]]:
+    """(problems, warnings): on a released book, an out-of-date or missing workflow is a warning, since only a
+    maintainer-approved pull request changes it there; on a draft, everything is a problem."""
+    if not released(book):
+        return problems, []
+    later = [p for p in problems if p.startswith(MAINTAINED)]
+    return ([p for p in problems if p not in later],
+            [p.replace("; run re-check readme --write", "; a maintainer-approved pull request brings it up to date "
+                       "(re-check readme --write writes it)") for p in later])
 
 
 def check_own_licences(write: bool = False, cfg: dict | None = None) -> list[str]:

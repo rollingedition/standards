@@ -147,6 +147,8 @@ def test_a_moved_pin_reruns_what_imports_it_or_depends_on_it(repo):
     assert sel.ids == ["uses-frames", "uses-words"]
     assert sel.examples["uses-words"] == ["six 1.16.0 to 1.17.0: it imports six, through lib/words.py"]
     assert sel.examples["uses-frames"] == ["six 1.16.0 to 1.17.0: it imports pandas, which depends on six"]
+    assert sel.reached == {"six": ["uses-frames", "uses-words"]}           # what each moved pin reached, for the record
+    assert sel.as_json()["reached"] == {"six": ["uses-frames", "uses-words"]}
 
 
 def test_a_comment_in_the_pins_changes_nothing(repo):

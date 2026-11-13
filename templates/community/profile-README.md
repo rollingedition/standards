@@ -9,5 +9,3 @@
 - **[standards]({standards})** holds the checks every book runs, the writing standards, and the code that draws each cover and edition code.
 
 {disclosure}
-
-<sub>{patent}</sub>

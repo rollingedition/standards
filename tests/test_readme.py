@@ -143,18 +143,19 @@ def test_every_book_carries_the_workflows_that_run_its_checks(tmp_path):
 
 def test_pull_requests_run_the_affected_examples_and_every_example_runs_weekly(tmp_path):
     """A pull request runs the examples its change could affect, against its base; a scheduled run once a week, and a
-    run by hand, run every example on main. The time comes from the config, so every book gets the same one."""
+    run by hand, run every example on main. The time is drawn from the book's slug, so the books' runs spread over the
+    week, and the same book always gets the same one."""
     book = book_at(tmp_path)
     readme.check(book, write=True)
     checks = yaml.safe_load((book.root / ".github" / "workflows" / "checks.yml").read_text())
     on = checks[True]                                       # PyYAML reads a bare `on:` key as True
     assert on["pull_request"] == {"types": ["opened", "synchronize", "reopened"]}
-    assert on["schedule"] == [{"cron": readme.load_config()["workflows"]["weekly_cron"]}] and "workflow_dispatch" in on
+    assert on["schedule"] == [{"cron": readme.weekly_cron(book.slug)}] and "workflow_dispatch" in on
     assert checks["jobs"]["checks"]["with"] == {
         "examples-scope": "${{ github.event_name == 'pull_request' && 'affected' || 'all' }}"}
     cfg = readme.load_config()
-    cfg["workflows"]["weekly_cron"] = "0 6 * * 3"
-    assert '- cron: "0 6 * * 3"' in readme.workflows(cfg)[".github/workflows/checks.yml"]
+    cfg["workflows"]["weekly_cron"] = "{minute} 6 * * 3"
+    assert f'- cron: "{readme.weekly_cron(book.slug, cfg).split()[0]} 6 * * 3"' in readme.workflows(cfg, book.slug)[".github/workflows/checks.yml"]
     assert readme.check(book, cfg=cfg) == [".github/workflows/checks.yml is out of date; run re-check readme --write"]
     reusable = yaml.safe_load((readme.TEMPLATES.parent / ".github" / "workflows" / "book-checks.yml").read_text())
     assert reusable[True]["workflow_call"]["inputs"]["examples-scope"] == {
@@ -169,3 +170,15 @@ def test_recorded_outputs_are_described_in_words_true_of_every_book(tmp_path):
     text = readme.readme(book)
     assert "Model outputs are recorded once in `examples/data/recorded/`" in text and "the examples never call a model" in text
     assert "LLM judgments" not in text and "embeddings" not in text
+
+
+def test_each_book_s_weekly_run_starts_at_a_time_drawn_from_its_slug():
+    """GitHub Free runs 20 jobs at once: the books' weekly runs spread over the week, at minutes clear of the hour's
+    first ones, where GitHub's schedule is busiest."""
+    times = [readme.weekly_cron(f"book-{n}") for n in range(60)]
+    assert readme.weekly_cron("tiny-book") == readme.weekly_cron("tiny-book")
+    assert len(set(times)) == 60
+    for t in times:
+        minute, hour, dom, month, weekday = t.split()
+        assert 5 <= int(minute) <= 55 and 0 <= int(hour) <= 23 and (dom, month) == ("*", "*") and 0 <= int(weekday) <= 6
+    assert len({t.split()[4] for t in times}) == 7 and len({t.split()[1] for t in times}) > 12

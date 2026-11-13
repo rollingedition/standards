@@ -89,7 +89,8 @@
     "prompt-engineering",
     "retrieval-augmented-generation",
     "llm-evaluation",
-    "natural-language-processing"
+    "natural-language-processing",
+    "fine-tuning"
    ],
    "description": "How language models work and how to build with them."
   },
@@ -186,9 +187,26 @@
    "wikidata": "Q197536",
    "related": [
     "natural-language-processing",
-    "model-evaluation"
+    "model-evaluation",
+    "fine-tuning"
    ],
    "description": "Neural networks and how to train them."
+  },
+  {
+   "id": "fine-tuning",
+   "label": "Fine-tuning",
+   "areas": [
+    "artificial-intelligence",
+    "machine-learning"
+   ],
+   "wikipedia": "Fine-tuning_(deep_learning)",
+   "wikidata": "Q117286419",
+   "related": [
+    "large-language-models",
+    "deep-learning",
+    "model-evaluation"
+   ],
+   "description": "Adapting a trained model to one task with your own data, and making it small enough to run."
   },
   {
    "id": "feature-engineering",
@@ -220,7 +238,8 @@
     "experimentation",
     "deep-learning",
     "feature-engineering",
-    "model-monitoring"
+    "model-monitoring",
+    "fine-tuning"
    ],
    "description": "Measuring whether a model is good enough, offline and online."
   },

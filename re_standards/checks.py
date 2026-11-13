@@ -16,6 +16,7 @@ import urllib.request
 from pathlib import Path
 
 from .bookfmt import Book, load_book
+from .readme import generated_names
 from .sections import manifest_ids
 from .tape import KIND_LABELS
 
@@ -55,17 +56,37 @@ def narration_only(paths: list[str]) -> bool:
 SKILL_FILE = "skill.md"           # the procedures of the book's agent skill, beside book.toml, never on the page
 
 
+def generated_only(paths: list[str]) -> bool:
+    """Whether a change touches nothing but the files `re-check readme` generates in every book: the front page, the
+    licences, renovate.json and the check workflows, as a retrofit across books regenerates them."""
+    names = generated_names()
+    return bool(paths) and all(p in names for p in paths)
+
+
 def rides_along(paths: list[str]) -> bool:
-    """Whether a change touches nothing but files that ride with the next edition: the narration files and the agent
-    skill's procedures. Neither is on the page, so such a change needs no kind label and cuts no edition of its own.
-    (Adding skill.md where the last edition had none does cut one: the release checks that, since it knows the edition.)"""
-    return bool(paths) and all(p.startswith(NARRATION_DIR) or p == SKILL_FILE for p in paths)
+    """Whether a change touches nothing but files that ride with the next edition: the narration files, the agent
+    skill's procedures and the generated repository files (generated_only). None is on the page, so such a change
+    needs no kind label and cuts no edition of its own. (Adding skill.md where the last edition had none does cut one:
+    the release checks that, since it knows the edition.)"""
+    if not paths:
+        return False
+    names = generated_names()
+    return all(p.startswith(NARRATION_DIR) or p == SKILL_FILE or p in names for p in paths)
+
+
+def riding_words(paths: list[str]) -> str:
+    """What a change that rides along touches, in words: "narration and the agent skill's procedures"."""
+    names = generated_names()
+    parts = [words for words, hit in (("narration", any(p.startswith(NARRATION_DIR) for p in paths)),
+                                      ("the agent skill's procedures", SKILL_FILE in paths),
+                                      ("the generated front page and workflows", any(p in names for p in paths))) if hit]
+    return " and ".join(parts) or "nothing"
 
 
 def check_kind_label(labels: list[str], changed: list[str] | None = None) -> list[str]:
-    """At least one kind: label, and no unknown ones. A pull request that changes only narration files or the agent
-    skill's procedures (`changed`, the paths it touches) needs none, since it changes nothing a reader sees on the page;
-    an unknown one is still refused."""
+    """At least one kind: label, and no unknown ones. A pull request that changes only narration files, the agent
+    skill's procedures or the generated repository files (`changed`, the paths it touches; rides_along) needs none,
+    since it changes nothing a reader sees on the page; an unknown one is still refused."""
     kinds = [label for label in labels if label.startswith("kind:")]
     problems = [f"unknown label {label!r}; kind labels are {', '.join(KIND_LABELS)}" for label in kinds if label not in KIND_LABELS]
     if not any(label in KIND_LABELS for label in kinds) and not rides_along(changed or []):

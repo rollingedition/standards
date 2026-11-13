@@ -1,0 +1,20 @@
+# When each rule of the books' checks took effect, so that a new rule never stops a released book's pull requests
+# (re_standards/rules.py). A draft keeps every rule from the start.
+#
+# A rule listed in [rules] holds a released book from its next content edition. Until the book's text or examples
+# change after the day the rule took effect, a problem the rule finds is a warning, and the pull request can merge. A
+# pull request that changes the book's text or examples makes that next edition, so it keeps every rule, and so does
+# every pull request after it. A rule that isn't listed holds every book.
+#
+# Add a rule here on the day it's added to a check, under the ID its problems start with ("W-61: ..."), with `since`,
+# that day in UTC, and `what`, the rule in a few words. A rule that guards readers or their agents, as W-59 does, isn't
+# listed: it holds every book at once. Rules up to `undated_through` were in force before rules had dates; a test holds
+# every later rule in writing/README.md to a date here.
+
+undated_through = "W-60"
+
+# A change to the book's text or examples: a file in these classes of review-tiers.toml's [files]
+content = ["prose", "code"]
+
+[rules]
+# "W-61" = { since = "2026-11-20", what = "..." }

@@ -11,10 +11,6 @@ free = "Free to read, forever."
 # The tagline (the founder, Nov 8, 2026): what the mission means for a reader. The homepage's headline, and the line
 # under the logo in the sites' footers; the mission, more formal, is on its own page and closes the homepage
 tagline = "Your tools change. Our books keep up."
-# The patent notice (the founder, Nov 9, 2026, the day the provisional application was filed): beside the copyright in
-# the sites' footers, and at the foot of the organization's GitHub page. Not on the books' own READMEs: their text and
-# code are CC BY 4.0 and MIT, and a notice there could read as if the books themselves were patented
-patent = "Patent pending"
 draft_banner = "Draft: not yet published"     # on a draft's README; its first edition is published after agent review
 code_copyright = "Copyright (c) Rolling Edition and contributors"
 
@@ -42,10 +38,13 @@ short = "Text is CC BY 4.0 and code is MIT. Credit Rolling Edition, link back to
 full = "Book text is CC BY 4.0: credit Rolling Edition, link back to the book and to the licence, and say what you changed. Code examples are MIT: keep the notice “{copyright}” and the MIT terms with any code you copy."
 
 # A book's own check workflows (.github/workflows/, from templates/book/workflows/). A pull request runs only the
-# examples its change could affect; once a week, at this time (cron, UTC), every example runs again on main, which
-# catches what no change shows, such as a new build of the runtime's base image.
+# examples its change could affect; once a week every example runs again on main, which catches what no change shows,
+# such as a new build of the runtime's base image. Its time (cron, UTC) is drawn from a hash of the book's slug, so the
+# books' weekly runs spread over the week instead of all starting at once (readme.weekly_cron): {minute} within
+# weekly_minutes, {hour} and {weekday} (0 is Sunday).
 [workflows]
-weekly_cron = "17 4 * * 1"
+weekly_cron = "{minute} {hour} * * {weekday}"
+weekly_minutes = [5, 55]
 
 [links]
 writing_standards = "https://github.com/rollingedition/standards/blob/main/writing/README.md"

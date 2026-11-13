@@ -272,6 +272,10 @@ def _check_style(book: Book, cfg: dict | None = None) -> list[str]:
                             "and move setup into a shared module")
 
     problems += check_recordings(book.root, cfg)
+    if status == "draft":                       # the kit (kit.py) holds the drafts it started; a released book's pull
+                                                # requests don't change, nor does a member's book
+        from . import kit
+        problems += kit.style_problems(book, cfg.get("kit") or kit.load_config())
     return problems
 
 

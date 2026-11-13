@@ -460,18 +460,17 @@ def check_pins(runtime: Runtime, backend: Backend) -> resolve.Resolution | None:
 
 
 def run_examples(book: Book, backend: Backend, timeout: float = 120, only: list[str] | None = None,
-                 prepared: bool = False) -> tuple[list[ExampleResult], dict]:
+                 prepared: bool = False, jobs: int = 1, seconds: dict[str, float] | None = None
+                 ) -> tuple[list[ExampleResult], dict]:
     """Every example, or those in `only`, in the pinned runtime. `prepared` says the caller has already read the pins and
-    built the runtime (as the choice of affected examples does, to read what it installs)."""
+    built the runtime (as the choice of affected examples does, to read what it installs). With `jobs` above 1, up to
+    that many run side by side, packed by `seconds`, each one's time in the last run (side_by_side)."""
     runtime = read_runtime(book.root)
     if not prepared:
         check_pins(runtime, backend)
         backend.prepare(runtime)
-    results = []
-    for eid in sorted(book.examples):
-        if only and eid not in only:
-            continue
-        results.append(run_one(book, eid, runtime, backend, timeout))
+    ids = [eid for eid in sorted(book.examples) if not only or eid in only]
+    results = side_by_side(ids, lambda eid: run_one(book, eid, runtime, backend, timeout), jobs, seconds or {}, timeout)
     return results, backend.describe(runtime)
 
 
@@ -533,3 +532,53 @@ def describe_versions(versions: dict, direct: list[str]) -> str:
     parts = [f"Python {versions['python']}"] if "python" in versions else []
     parts += [f"{d} {versions[d]}" for d in direct if d in versions]
     return " · ".join(parts)
+
+
+# ---------------------------------------------------------------- side by side
+
+
+# The share of the limit an example's last time may take, multiplied by the examples running beside it, for it to share
+# the machine: each starts its numeric libraries' threads as if the machine were its own, so beside N others a busy one
+# may take up to N times as long. Half leaves the limit twice that worst case.
+SHARE_OF_LIMIT = 0.5
+
+
+def plan_side_by_side(ids: list[str], seconds: dict[str, float], jobs: int, timeout: float) -> tuple[list[str], list[str]]:
+    """Which examples share the machine, longest first so the last to start are the shortest, and which run alone after
+    them: one with no recorded time, and one whose time beside `jobs` - 1 others could near the limit."""
+    shared, alone = [], []
+    for eid in ids:
+        t = seconds.get(eid)
+        fits = isinstance(t, (int, float)) and not isinstance(t, bool) and 0 <= t and t * jobs <= timeout * SHARE_OF_LIMIT
+        (shared if fits else alone).append(eid)
+    shared.sort(key=lambda eid: (-seconds[eid], eid))
+    return shared, alone
+
+
+def side_by_side(ids: list[str], run, jobs: int, seconds: dict[str, float], timeout: float) -> list:
+    """`run` for each example, `jobs` at a time where plan_side_by_side lets them share, the rest one at a time after,
+    in `ids`' order either way. Each run is a process of its own, in a scratch folder of its own, so only the time it
+    takes can change with what runs beside it. One job runs every example in turn, as before."""
+    if jobs <= 1 or len(ids) < 2:
+        return [run(eid) for eid in ids]
+    from concurrent.futures import ThreadPoolExecutor
+    shared, alone = plan_side_by_side(ids, seconds, jobs, timeout)
+    done = {}
+    if shared:
+        with ThreadPoolExecutor(max_workers=jobs, thread_name_prefix="re-example") as pool:
+            for eid, result in zip(shared, pool.map(run, shared)):
+                done[eid] = result
+    for eid in alone:
+        done[eid] = run(eid)
+    return [done[eid] for eid in ids]
+
+
+def recorded_seconds(report: dict | None) -> dict[str, float]:
+    """Each example's time from a run's report: a --report file, or an edition's examples.json, whose examples that
+    didn't run keep the time of the run that did."""
+    out = {}
+    for e in (report or {}).get("examples") or []:
+        if isinstance(e, dict) and isinstance(e.get("example_id"), str) and isinstance(e.get("seconds"), (int, float)) \
+                and not isinstance(e.get("seconds"), bool) and e["seconds"] > 0:
+            out[e["example_id"]] = float(e["seconds"])
+    return out

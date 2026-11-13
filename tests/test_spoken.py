@@ -264,10 +264,11 @@ def test_the_check_lists_missing_descriptions_and_uncovered_terms(tmp_path):
     assert 'a python block in \'compare-two-runs\' has no description; add [[blocks]] section = "compare-two-runs", starts = "print(\\"unread\\")"' in text
     assert "a table in 'compare-two-runs' has no description" in text
     # without the book's lexicon, its terms are listed once per chapter, with the line they first appear on
-    assert "chapters/01-first-steps.md:11: no rule reads 'BM25'; add a reading to narration/lexicon.toml" in text
+    assert ("chapters/01-first-steps.md:11: no rule reads 'BM25'; add a reading to narration/first-steps.toml's [terms], "
+            "or to narration/lexicon.toml if every chapter needs it") in text
     assert "no rule reads 'nDCG' (2 times)" in text           # its @10 reads as "at ten" already
     # inline code is named whole, as a lexicon entry would match it, with the words no rule reads
-    assert "chapters/01-first-steps.md:11: no rule reads 'k1' in the code 'k1=1.5'; add a reading to narration/lexicon.toml" in text
+    assert "chapters/01-first-steps.md:11: no rule reads 'k1' in the code 'k1=1.5'; add a reading to narration/first-steps.toml's" in text
     assert "ndcg_at_k" not in text                            # a lowercase identifier reads by its parts
 
 
@@ -307,6 +308,29 @@ def test_an_unresolved_binding_stays_as_written_and_is_listed(tmp_path):
     prose = [t for t in texts(spoken.chapter_script(book, "first-steps")) if t.startswith("B M twenty-five")]
     assert "an N D C G at ten of {{out:ndcg-for-one-query:recall}} on" in prose[0]
     assert any("chapters/01-first-steps.md:11: {{out:ndcg-for-one-query:recall}}" in w for w in spoken.check_narration(book))
+
+
+def test_a_chapters_own_readings_join_the_lexicon_and_read_exactly_as_the_shared_one(tmp_path):
+    """Writers working in parallel each keep their chapter's readings in its own file: the script, and so every clip's
+    key, is the same as with the same readings in lexicon.toml."""
+    shared = tiny(tmp_path / "shared", described=DESCRIBED)
+    own = tiny(tmp_path / "own", lexicon=None, described=LEXICON + "\n" + DESCRIBED)
+    assert spoken.chapter_script(own, "first-steps") == spoken.chapter_script(shared, "first-steps")
+    assert spoken.load_narration(own.root).problems == []
+    assert not any("no rule reads 'BM25'" in w for w in spoken.check_narration(own))
+
+
+def test_lexicon_toml_wins_and_two_chapters_that_disagree_are_listed(tmp_path):
+    book = tiny(tmp_path, lexicon='[terms]\n"BM25" = "B M twenty five"\n', described=DESCRIBED + LEXICON, **{
+        "zz-other.toml": '[terms]\n"nDCG@10" = "N D C G at 10"\n"BM25" = "bee em"\n\n[words]\nNDCG = "N D C G"\n'})
+    narration = spoken.load_narration(book.root)
+    assert narration.terms["BM25"] == "B M twenty five"                   # lexicon.toml's reading
+    assert narration.terms["nDCG@10"] == "N D C G at ten"                 # the first chapter file's, by name
+    assert narration.problems == ["narration/zz-other.toml [terms]: 'nDCG@10' reads differently in "
+                                  "narration/first-steps.toml; move one reading to narration/lexicon.toml, which every "
+                                  "chapter shares"]                       # BM25 is settled, and ndcg agrees
+    assert any(w.startswith("narration/zz-other.toml [terms]: 'nDCG@10'")
+               for w in spoken.check_narration(book, chapter_id="first-steps"))
 
 
 def test_narration_files_are_checked_for_what_they_hold(tmp_path):

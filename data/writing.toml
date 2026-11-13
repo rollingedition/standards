@@ -42,3 +42,28 @@ max_lines = 400                # non-blank lines of procedures; the generated st
 max_words = 3000               # about 4,000 tokens, inside the format's advice of 5,000 for a whole SKILL.md
 min_procedures = 1
 link_hosts = ["rollingedition.com", "rollingedition.ai"]   # besides the sources the chapters cite
+
+[summary]                      # W-60: book.toml's summary, one sentence in the catalog's shape
+words = [30, 55]               # the usual range, about 40 words: outside it, re-check manifest notes it and never fails
+
+[kit]                          # what every new draft starts with (`re-check kit`), and what `re-check style` holds a draft to
+threads = 2                    # each numerical library's threads, set by examples/lib before any of them loads
+seed = 0                       # Python's random and numpy's global generator, seeded by examples/lib
+thread_variables = ["OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS",
+                    "VECLIB_MAXIMUM_THREADS", "RAYON_NUM_THREADS", "POLARS_MAX_THREADS"]
+# .gitignore's lines: bytecode, environments and scratch never reach the book. A book adds its own below them.
+ignore = ["__pycache__/", "*.py[cod]", ".venv/", "/scratch/", ".ipynb_checkpoints/", ".pytest_cache/", "*.egg-info/",
+          ".DS_Store"]
+# W-17, by the code: an example imports from lib before any of these, so their threads and seeds are fixed first
+numerical = ["numpy", "scipy", "pandas", "polars", "pyarrow", "sklearn", "statsmodels", "torch", "tensorflow", "jax",
+             "lightgbm", "xgboost", "catboost", "numba", "transformers", "sentence_transformers", "tokenizers", "faiss",
+             "onnxruntime", "peft", "statsforecast", "mlforecast", "neuralforecast", "prophet", "gensim", "implicit"]
+# What reads the clock or the memory in use: an entry that's a module covers everything in it
+timing = ["time.time", "time.time_ns", "time.perf_counter", "time.perf_counter_ns", "time.monotonic", "time.monotonic_ns",
+          "time.process_time", "time.process_time_ns", "time.thread_time", "time.thread_time_ns", "time.localtime",
+          "time.gmtime", "time.ctime", "time.strftime", "timeit", "tracemalloc", "resource.getrusage", "psutil",
+          "datetime.datetime.now", "datetime.datetime.today", "datetime.datetime.utcnow", "datetime.date.today",
+          "pandas.Timestamp.now", "pandas.Timestamp.today", "pandas.Timestamp.utcnow"]
+# What lists results in whatever order the file system or the workers give: by name, and as a method on any object
+unordered = ["os.listdir", "os.scandir", "os.walk", "glob.glob", "glob.iglob", "concurrent.futures.as_completed"]
+unordered_methods = ["iterdir", "glob", "rglob", "imap_unordered"]

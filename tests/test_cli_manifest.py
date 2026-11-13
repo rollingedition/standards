@@ -27,3 +27,15 @@ def test_manifest_check_reports_a_missing_or_broken_file(tmp_path, capsys, monke
     assert cli.main(["manifest", "--book", str(tmp_path)]) == 1
     assert "does not parse" in capsys.readouterr().err
     assert "Book manifest: failed" in summary.read_text()
+
+
+def test_a_summary_far_from_the_catalog_s_length_gets_a_note_and_never_fails(tmp_path, capsys):
+    """W-60: guidance, not a limit (the founder, Nov 11, 2026)."""
+    write_book(tmp_path, summary='"Forecasts you can trust, from baselines and backtests to uncertainty you can act on."')
+    assert cli.main(["manifest", "--book", str(tmp_path)]) == 0
+    out = capsys.readouterr()
+    assert "validates against taxonomy" in out.out and "W-60: the summary has 14 words" in out.err
+    words = " ".join(["word"] * 40)
+    write_book(tmp_path, summary=f'"{words}"')
+    assert cli.main(["manifest", "--book", str(tmp_path)]) == 0
+    assert "W-60" not in capsys.readouterr().err

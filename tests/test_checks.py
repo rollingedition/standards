@@ -106,7 +106,7 @@ def test_the_kind_label_check_reads_what_the_pull_request_changes_from_the_book(
     event.write_text(json.dumps({"pull_request": {"labels": [], "base": {"sha": base}, "head": {"sha": head}}}))
     assert checks.changed_from_event(event, book) == ["narration/a.toml"]
     assert cli.main(["kind-label", "--event", str(event), "--book", str(book)]) == 0
-    assert "only narration or the agent skill's procedures changed (narration/a.toml): no kind label needed" in capsys.readouterr().out
+    assert "only narration changed (narration/a.toml): no kind label needed" in capsys.readouterr().out
     assert cli.main(["kind-label", "--event", str(event)]) == 1                 # without the book, a label is needed
     (book / "chapters" / "01-a.md").write_text("# A, again\n")
     git("commit", "-qam", "and the page")

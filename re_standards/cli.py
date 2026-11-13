@@ -3,6 +3,10 @@
 Book repos call these through the reusable workflows in .github/workflows/. Each check prints one
 "ok" line on success, or every problem it found and exits 1. A check that warns, as narration does, lists what it
 found and exits 0, unless --strict.
+
+A rule with a date (data/rules.toml) warns on a released book until its next content edition (rules.py): the manifest,
+style, skill and addressed checks take `--base-ref`, the pull request's base, to tell whether the change makes that
+edition. A released book's out-of-date workflows warn too, since only a maintainer-approved pull request changes them.
 """
 from __future__ import annotations
 
@@ -13,7 +17,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import addressed as addressed_check, affected, bookfmt, catalog, checks, community, data_path, examples, readme, resolve, skill, spoken, style
+from . import addressed as addressed_check, affected, bookfmt, catalog, checks, community, data_path, examples, kit, readme, resolve, rules, skill, spoken, style
 from . import models as model_files
 
 
@@ -35,6 +39,16 @@ def report(name: str, problems: list[str], ok_line: str, warn: bool = False) -> 
     return 1 if problems and not warn else 0
 
 
+def report_dated(name: str, problems: list[str], ok_line: str, root: Path, manifest: dict | None,
+                 base_ref: str | None = None) -> int:
+    """report(), with a dated rule that doesn't hold the book yet listed as a warning (rules.py) instead of failing."""
+    failures, warnings = rules.split(problems, root, manifest, base_ref or None)
+    rc = report(name, failures, ok_line)
+    if warnings:
+        report(f"{name}, rules this book takes with its next content edition", warnings, "", warn=True)
+    return rc
+
+
 def taxonomy_path(args) -> Path:
     return Path(args.taxonomy) if args.taxonomy else data_path("taxonomy.json")
 
@@ -42,6 +56,8 @@ def taxonomy_path(args) -> Path:
 def cmd_manifest(args) -> int:
     tax = catalog.load_taxonomy(taxonomy_path(args))
     manifest = Path(args.book) / "book.toml"
+    notes: list[str] = []
+    book: dict | None = None
     problems = catalog.validate_taxonomy(tax) + catalog.validate_anchors(tax)
     if not manifest.exists():
         problems.append("book.toml is missing at the root of the book")
@@ -52,8 +68,23 @@ def cmd_manifest(args) -> int:
             problems.append(f"book.toml does not parse: {e}")
         else:
             problems += catalog.validate_book(book, tax)
-    return report("Book manifest", problems,
-                  f"book.toml validates against taxonomy v{tax['version']} ({len(tax['skills'])} skills)")
+            notes = summary_notes(book)
+    rc = report_dated("Book manifest", problems,
+                      f"book.toml validates against taxonomy v{tax['version']} ({len(tax['skills'])} skills)",
+                      Path(args.book), book, args.base_ref)
+    if not problems and manifest.exists() and notes:
+        report("Book summary", notes, "", warn=True)       # guidance (W-60): it never fails a pull request
+    return rc
+
+
+def summary_notes(book: dict) -> list[str]:
+    """W-60: a summary far from the catalog's usual length, as a note. There's no fixed limit."""
+    lo, hi = style.load_config().get("summary", {}).get("words", [0, 10 ** 6])
+    n = len(str(book.get("summary") or "").split())
+    if n and not lo <= n <= hi:
+        return [f"W-60: the summary has {n} words; the catalog's run about {lo} to {hi}, in one sentence: what the book "
+                "teaches, then after a colon what it covers, then what it works on"]
+    return []
 
 
 def cmd_wikidata(args) -> int:
@@ -83,7 +114,7 @@ def cmd_kind_label(args) -> int:
     problems = checks.check_kind_label(labels, changed)
     kinds = [x for x in labels if x.startswith("kind:")]
     if not kinds and checks.rides_along(changed or []):
-        ok = (f"only narration or the agent skill's procedures changed ({', '.join(changed)}): no kind label needed, "
+        ok = (f"only {checks.riding_words(changed)} changed ({', '.join(changed)}): no kind label needed, "
               "since the page doesn't change; the change rides with the book's next edition")
     else:
         ok = "kind labels: " + ", ".join(kinds)
@@ -101,8 +132,22 @@ def workflow_command(level: str, title: str, message: str) -> None:
 
 
 def write_report(args, data: dict) -> None:
-    if args.report:
-        Path(args.report).write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
+    """The results as JSON, to --report, else to $RE_EXAMPLES_REPORT: how a caller that runs this check as it's given,
+    such as the release service's gates, reads each example's time without changing the command."""
+    path = args.report or os.environ.get("RE_EXAMPLES_REPORT")
+    if path:
+        Path(path).write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
+
+
+def seconds_from(path: str | None) -> dict[str, float]:
+    """Each example's time in an earlier run, for --jobs to pack them by: a --report file or an edition's examples.json."""
+    if not path:
+        return {}
+    try:
+        return examples.recorded_seconds(json.loads(Path(path).read_text(encoding="utf-8")))
+    except (OSError, ValueError) as e:
+        why = e.strerror if isinstance(e, OSError) else str(e)
+        raise examples.ExamplesError(f"--seconds: {path} isn't a report of an earlier run: {why}") from None
 
 
 def runtime_or_none(book) -> dict:
@@ -133,7 +178,8 @@ def cmd_examples(args) -> int:
         if args.list or only == []:
             results, runtime = [], (backend.describe(examples.read_runtime(book.root)) if only == [] else {})
         else:
-            results, runtime = examples.run_examples(book, backend, timeout=args.timeout, only=only, prepared=prepared)
+            results, runtime = examples.run_examples(book, backend, timeout=args.timeout, only=only, prepared=prepared,
+                                                     jobs=args.jobs, seconds=seconds_from(args.seconds))
     except examples.UnsatisfiablePins as e:
         # Nothing was built and no example ran: a resolver's verdict, never an example's failure.
         found = e.resolution
@@ -189,15 +235,17 @@ def cmd_style(args) -> int:
     words = sum(len(style.WORD.findall(t)) for c in book.chapters for _, t in style._prose_lines(c.body, c.body_offset))
     skipped = f" (skipping {', '.join(sorted(skip))})" if skip else ""
     skipped += f" (with {', '.join(args.limit)})" if args.limit else ""
-    return report("Writing standards", problems,
-                  f"{len(book.chapters)} chapter(s), {words:,} words of prose: the lint rules of the writing standards pass"
-                  + skipped)
+    return report_dated("Writing standards", problems,
+                        f"{len(book.chapters)} chapter(s), {words:,} words of prose: the lint rules of the writing "
+                        "standards pass" + skipped, book.root, book.manifest, args.base_ref)
 
 
 def cmd_addressed(args) -> int:
     book = bookfmt.load_book(Path(args.book))
     problems = addressed_check.check_addressed(book, addressed_check.load_config(Path(args.config)) if args.config else None)
-    return report("Text addressed to a model", problems, f"no text addressed to a model in {len(book.chapters)} chapter(s)")
+    return report_dated("Text addressed to a model", problems,
+                        f"no text addressed to a model in {len(book.chapters)} chapter(s)", book.root, book.manifest,
+                        args.base_ref)
 
 
 def cmd_skill(args) -> int:
@@ -207,7 +255,8 @@ def cmd_skill(args) -> int:
         return report("Agent skill", notes, "", warn=True)
     found, _ = skill.read(book.root)
     n = sum(1 for line in found.body.split("\n") if line.startswith("## ")) if found else 0
-    return report("Agent skill", problems, f"skill.md: {n} procedure(s), each citing the sections it comes from")
+    return report_dated("Agent skill", problems, f"skill.md: {n} procedure(s), each citing the sections it comes from",
+                        book.root, book.manifest, args.base_ref)
 
 
 def cmd_narration(args) -> int:
@@ -226,11 +275,31 @@ def cmd_narration(args) -> int:
     return 1 if warnings and args.strict else rc
 
 
+def cmd_kit(args) -> int:
+    """The book kit (kit.py): with --write, its files and, for each --chapter, a numbered stub and the chapter's own
+    narration file; without, what the book lacks of it. A draft fails on what's missing; a released book is told."""
+    root = Path(args.book)
+    draft = kit.is_draft(root)
+    if args.write:
+        written, problems = kit.write(root, args.chapter)
+        for rel in written:
+            print(f"wrote  {rel}")
+        return report("Book kit", problems, f"the kit is in place ({len(written)} file(s) written)")
+    if args.chapter:
+        return report("Book kit", ["--chapter goes with --write"], "")
+    problems = kit.check(root)
+    return report("Book kit", problems, "the kit's files are in place and unchanged", warn=not draft)
+
+
 def cmd_readme(args) -> int:
     book = bookfmt.load_book(Path(args.book))
-    problems = readme.check(book, write=args.write)
-    return report("Front page", problems, "README.md, CITATION.cff, LICENSE, LICENSE-CODE, renovate.json and the check workflows are "
-                  + ("written" if args.write else "up to date"))
+    problems, later = readme.held_for_maintainer(book, readme.check(book, write=args.write))
+    rc = report("Front page", problems, "README.md, CITATION.cff, LICENSE, LICENSE-CODE, renovate.json and the check "
+                "workflows are " + ("written" if args.write else "up to date") if not later else
+                "README.md, CITATION.cff, LICENSE, LICENSE-CODE and renovate.json are up to date")
+    if later:
+        report("Front page, the book's workflows", later, "", warn=True)
+    return rc
 
 
 def cmd_models(args) -> int:
@@ -268,9 +337,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="re-check", description=__doc__.split("\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
 
+    base_ref = ("the pull request's base commit: a rule with a date (data/rules.toml) holds a released book from the "
+                "change that alters its text or examples, and warns before")
     s = sub.add_parser("manifest", help="validate book.toml against the taxonomy")
     s.add_argument("--book", default=".", help="the book repo checkout")
     s.add_argument("--taxonomy", help="taxonomy.json (default: this standards checkout)")
+    s.add_argument("--base-ref", help=base_ref)
     s.set_defaults(fn=cmd_manifest)
 
     s = sub.add_parser("wikidata", help="check or fill Wikidata IDs from Wikipedia titles (needs the internet)")
@@ -296,7 +368,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--book", default=".")
     s.add_argument("--backend", choices=["venv", "container", "host"], help="default: $RE_EXAMPLES_BACKEND, else container")
     s.add_argument("--record", action="store_true", help="write each passing run's output as the expected output")
-    s.add_argument("--report", help="write the results as JSON")
+    s.add_argument("--report", help="write the results as JSON (default: $RE_EXAMPLES_REPORT, when it's set)")
     which = s.add_mutually_exclusive_group()
     which.add_argument("--only", help="comma-separated example IDs")
     which.add_argument("--affected", action="store_true",
@@ -308,6 +380,11 @@ def build_parser() -> argparse.ArgumentParser:
                                       "edition's; `none` for no record (the default)")
     s.add_argument("--list", action="store_true", help="with --affected: print the selection and run nothing")
     s.add_argument("--timeout", type=float, default=120)
+    s.add_argument("--jobs", type=int, default=1, help="run up to this many examples side by side, packed by --seconds; "
+                                                         "one with no recorded time, or too slow to share the machine "
+                                                         "within --timeout, runs alone (default 1: one at a time)")
+    s.add_argument("--seconds", help="with --jobs: an earlier run's --report, or an edition's examples.json, for each "
+                                     "example's time")
     s.set_defaults(fn=cmd_examples)
 
     s = sub.add_parser("style", help="the lint rules of the writing standards: lengths, time words, typed versions, bindings, banned words")
@@ -318,18 +395,21 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--limit", action="append", default=[], metavar="NAME=LO,HI",
                    help="one of writing.toml's [length] limits as this book keeps it, such as chapter_words=1500,6000: "
                         "the rule's other limits stay; repeat it for more")
+    s.add_argument("--base-ref", help=base_ref)
     s.set_defaults(fn=cmd_style)
 
     s = sub.add_parser("addressed", help="text written to an AI system: hidden characters, and phrases such as \"ignore previous "
                        "instructions\" in prose, comments, link titles and book.toml (code and inline code are exempt)")
     s.add_argument("--book", default=".")
     s.add_argument("--config", help="addressed.toml (default: this standards checkout)")
+    s.add_argument("--base-ref", help=base_ref)
     s.set_defaults(fn=cmd_addressed)
 
     s = sub.add_parser("skill", help="skill.md, the procedures of the book's agent skill: each cites its sections, links "
                        "only to the book and the sources it cites, binds its versions, and fits the format")
     s.add_argument("--book", default=".")
     s.add_argument("--config", help="writing.toml (default: this standards checkout)")
+    s.add_argument("--base-ref", help=base_ref)
     s.set_defaults(fn=cmd_skill)
 
     s = sub.add_parser("narration", help="the spoken script: terms no rule reads, and examples, blocks and tables with no "
@@ -340,6 +420,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--edition", help="the edition code the whole book's credits read, with --script")
     s.add_argument("--strict", action="store_true", help="exit 1 when there are warnings")
     s.set_defaults(fn=cmd_narration)
+
+    s = sub.add_parser("kit", help="the book kit every draft starts with: .gitignore, examples/lib (threads and seeds), "
+                       "recordings/recorded.py (record into scratch, then copy in); --write writes it, and --chapter ID, "
+                       "repeated in the plan's order, numbered chapter stubs with their own narration files")
+    s.add_argument("--book", default=".")
+    s.add_argument("--write", action="store_true", help="write the kit's files; a generated one is written again, and "
+                                                        "an existing chapter is never touched")
+    s.add_argument("--chapter", action="append", default=[], metavar="ID",
+                   help="with --write: a chapter's ID, in the plan's order, for chapters/NN-ID.md and narration/ID.toml")
+    s.set_defaults(fn=cmd_kit)
 
     s = sub.add_parser("readme", help="the generated front page: README.md, CITATION.cff, LICENSE, LICENSE-CODE and renovate.json")
     s.add_argument("--book", default=".")

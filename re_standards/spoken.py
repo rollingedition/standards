@@ -10,6 +10,11 @@ announced where it has none. Then every Line goes through the shared rules in `d
     narration/{chapter_id}.toml   [examples.{example_id}] say = "…"
                                   [[blocks]] section = "…"  starts = "its first line"  say = "…"
                                   [[tables]] section = "…"  starts = "| its first | row"  say = "…"
+                                  [terms] and [words]: the chapter's own readings, for the whole book
+
+A chapter's own readings join the book's lexicon, so writers working on chapters in parallel each edit only their
+chapter's file, never one shared one. lexicon.toml's readings win over a chapter's; two chapters that read one term
+differently are listed, for lexicon.toml to settle.
 
 `re-check narration` lists what the rules don't cover, so a writer can read the script before a voice does.
 """
@@ -85,9 +90,26 @@ def _strings(table, where: str, problems: list[str]) -> dict[str, str]:
     return {k: v for k, v in table.items() if isinstance(v, str)}
 
 
+def _chapter_readings(chapters: dict[str, list[tuple[str, str]]], settled: dict[str, str], kind: str,
+                      problems: list[str]) -> dict[str, str]:
+    """The chapters' own readings of one kind, for the terms lexicon.toml doesn't settle: a term two chapter files read
+    differently is listed, and the first file's reading, by name, is kept until lexicon.toml settles it."""
+    out = {}
+    for key, given in chapters.items():
+        if key in settled:
+            continue
+        out[key] = given[0][0]
+        for value, rel in given[1:]:
+            if value != given[0][0]:
+                problems.append(f"{rel} [{kind}]: {key!r} reads differently in {given[0][1]}; move one reading to "
+                                "narration/lexicon.toml, which every chapter shares")
+    return out
+
+
 def load_narration(book_root: Path) -> Narration:
     """The book's narration/ folder. Every file is optional; problems are collected for the check, never raised."""
     out = Narration()
+    own: dict[str, dict[str, list[tuple[str, str]]]] = {"terms": {}, "words": {}}   # the chapters' own readings
     folder = Path(book_root) / "narration"
     for path in sorted(folder.glob("*.toml")) if folder.is_dir() else []:
         rel = f"narration/{path.name}"
@@ -103,8 +125,12 @@ def load_narration(book_root: Path) -> Narration:
             out.words = {k.lower(): v for k, v in _strings(data.get("words", {}), f"{rel} [words]", out.problems).items()}
             continue
         chapter: dict = {"examples": {}, "blocks": [], "tables": []}
-        for key in sorted(set(data) - {"examples", "blocks", "tables"}):
-            out.problems.append(f"{rel}: unknown key {key!r}; a chapter's narration has [examples.ID], [[blocks]] and [[tables]]")
+        for key in sorted(set(data) - {"examples", "blocks", "tables", "terms", "words"}):
+            out.problems.append(f"{rel}: unknown key {key!r}; a chapter's narration has [examples.ID], [[blocks]], "
+                                "[[tables]], and its own readings as [terms] and [words]")
+        for kind in ("terms", "words"):
+            for key, value in _strings(data.get(kind, {}), f"{rel} [{kind}]", out.problems).items():
+                own[kind].setdefault(key.lower() if kind == "words" else key, []).append((value, rel))
         examples = data.get("examples", {})
         if not isinstance(examples, dict):
             out.problems.append(f"{rel}: examples must be tables, as [examples.example-id]")
@@ -127,6 +153,9 @@ def load_narration(book_root: Path) -> Narration:
                     continue
                 chapter[kind].append({"n": n, **entry})
         out.chapters[path.stem] = chapter
+    # lexicon.toml's readings win; a chapter's come first, so a book whose chapters give none reads exactly as before
+    out.terms = {**_chapter_readings(own["terms"], out.terms, "terms", out.problems), **out.terms}
+    out.words = {**_chapter_readings(own["words"], out.words, "words", out.problems), **out.words}
     return out
 
 
@@ -828,7 +857,8 @@ def check_narration(book: Book, *, narration: Narration | None = None, rules: di
         warnings += narration.problems
         warnings += [f"narration/{cid}.toml: there's no chapter {cid!r} in this book" for cid in sorted(set(narration.chapters) - known)]
     else:
-        warnings += [p for p in narration.problems if p.startswith((f"narration/{chapter_id}.toml", "narration/lexicon.toml"))]
+        warnings += [p for p in narration.problems if p.startswith((f"narration/{chapter_id}.toml", "narration/lexicon.toml"))
+                     or f" in narration/{chapter_id}.toml;" in p]
     unresolved = book.binding_problems()
     for c in chapters:
         built = _build(book, c.chapter_id, None, narration, rules, speaker)
@@ -885,5 +915,6 @@ def check_narration(book: Book, *, narration: Narration | None = None, rules: di
         for (what, term, missed), (first, count) in seen.items():
             times = f" ({count} times)" if count > 1 else ""
             said = f"{missed!r} in the code {term!r}" if what == "code" and missed != term else repr(term)
-            warnings.append(f"{c.file}:{first}: no rule reads {said}{times}; add a reading to narration/lexicon.toml")
+            warnings.append(f"{c.file}:{first}: no rule reads {said}{times}; add a reading to {rel}'s [terms], or to "
+                            "narration/lexicon.toml if every chapter needs it")
     return warnings

@@ -326,6 +326,7 @@ class Selection:
     everything: list[str] = field(default_factory=list)   # why every example runs; empty when only `examples` do
     notes: list[str] = field(default_factory=list)
     base: str = ""
+    reached: dict[str, list[str]] = field(default_factory=dict)   # each moved pin -> the examples it reaches
 
     @property
     def ids(self) -> list[str]:
@@ -333,7 +334,8 @@ class Selection:
 
     def as_json(self) -> dict:
         return {"scope": "affected", "base": self.base, "all": bool(self.everything), "why_all": self.everything,
-                "total": self.total, "run": {eid: self.examples[eid] for eid in self.ids}, "notes": self.notes}
+                "total": self.total, "run": {eid: self.examples[eid] for eid in self.ids}, "notes": self.notes,
+                "reached": {name: sorted(ids) for name, ids in sorted(self.reached.items())}}
 
     def lines(self) -> list[str]:
         against = f"against {self.base[:12]}" if self.base else "with no base to compare"
@@ -456,6 +458,7 @@ def _by_imports(book: Book, sel: Selection, modules: list[str], moved: dict[str,
                 change = f"{name} {old} to {new}"
                 hits = sorted((top, d) for top, dists in imported.items() for d in dists if d in dependents[name])
                 direct = [top for top, d in hits if d == name]
+                before = len(why)
                 if direct:
                     via = imp.names[direct[0]]
                     why.append(f"{change}: it imports {direct[0]}" + ("" if via == f"{eid}.py" else f", through {via}"))
@@ -469,6 +472,8 @@ def _by_imports(book: Book, sel: Selection, modules: list[str], moved: dict[str,
                     why.append(f"{change}: its imports can't all be read: {imp.unknown[0]}")
                 elif unnamed:
                     why.append(f"{change}: it imports {unnamed[0]}, which no installed package's metadata names")
+                if len(why) > before:
+                    sel.reached.setdefault(name, []).append(eid)
         if not why:
             del sel.examples[eid]
 

@@ -105,6 +105,16 @@ def test_the_report_says_passed_failed_or_error(tmp_path, monkeypatch):
     assert data["outcome"] == "error" and "not pinned" in data["error"]
 
 
+def test_the_report_goes_where_re_examples_report_says_when_no_report_is_asked_for(tmp_path, monkeypatch):
+    """How the release service's gates read each example's time without changing the command they run."""
+    root = pinned(make_book(tmp_path / "book"))
+    report = tmp_path / "from-env.json"
+    monkeypatch.setenv("RE_EXAMPLES_REPORT", str(report))
+    assert cli.main(["examples", "--book", str(root), "--backend", "host"]) == 0
+    data = json.loads(report.read_text())
+    assert data["outcome"] == "passed" and all("seconds" in e for e in data["examples"])
+
+
 def test_the_resolver_reads_only_pins_a_backend_is_about_to_install(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(resolve, "check", lambda *a, **k: calls.append(a) or resolve.Resolution("ok"))

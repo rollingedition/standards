@@ -176,18 +176,22 @@ def check(book: Book, cfg: dict | None = None) -> tuple[list[str], list[str]]:
 
 
 def body_for_agents(book: Book, skill: Skill, reference: str = "references/{chapter}.md",
-                    script: str = "scripts/{example}.py") -> str:
+                    script="scripts/{example}.py") -> str:
     """The procedures as SKILL.md carries them: each section link pointed at its chapter's reference file, each
-    example at its script, and every binding filled in from the pins and the recorded outputs."""
+    example at its script, and every binding filled in from the pins and the recorded outputs. `reference` and `script`
+    are templates, or functions (of the chapter and unit IDs, and of the example's ID) for a skill that carries neither
+    and links to the book's pages instead."""
     live = section_of(book)
+    to_script = script if callable(script) else (lambda example: script.format(example=example))
+    to_ref = reference if callable(reference) else (lambda chapter, unit: f"{reference.format(chapter=chapter)}#{unit}")
 
     def link(m: re.Match) -> str:
         text, target = m.group(1), m.group(2)
         if target.startswith("#") and target[1:] in live:
-            return f"[{text}]({reference.format(chapter=live[target[1:]])}#{target[1:]})"
+            return f"[{text}]({to_ref(live[target[1:]], target[1:])})"
         ex = EXAMPLE.match(target)
         if ex:
-            return f"[{text}]({script.format(example=ex.group(1))})"
+            return f"[{text}]({to_script(ex.group(1))})"
         return m.group(0)
 
     out, fence = [], None

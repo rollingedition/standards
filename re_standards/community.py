@@ -33,7 +33,7 @@ def files(cfg: dict | None = None) -> tuple[dict[str, str], list[str]]:
     def fill(name: str) -> str:
         return ((COMMUNITY / name).read_text(encoding="utf-8").replace("{kinds}", kinds).replace("{standards}", cfg["standards"])
                 .replace("{mission}", brand["mission"]).replace("{free}", brand["free"])
-                .replace("{disclosure}", brand["disclosure"]).replace("{patent}", brand["patent"])
+                .replace("{disclosure}", brand["disclosure"])
                 .replace("{site}", cfg["site"]).replace("{security_contact}", cfg.get("security_contact", ""))
                 .replace("{contributing}", cfg.get("contributing", "")))
     out = {

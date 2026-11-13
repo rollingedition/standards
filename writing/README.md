@@ -30,6 +30,9 @@ Either way, don't explain what a DataFrame is in a book about search.
 **W-3 One capability per chapter, one idea per section.** If a section heading needs "and", split the section.
 *Why:* small units are easier to learn, review, cite and update. *Check:* critic.
 
+**W-60 A summary in the catalog's shape.** The summary in `book.toml` is one sentence in three parts: what the book teaches, in the reader's words; after a colon, the main things it covers, in the book's order; and what it works on, its case, data or tools. Aim for about 40 words, as the other books' summaries run, so the catalog reads evenly; there's no fixed limit. Write "How search engines find and rank results, and how to measure whether a change helps: lexical, semantic and hybrid retrieval, reranking with learned models and LLMs, and judgments from people and LLMs, on a real product catalog." Not a tagline, such as "Forecasts you can trust", and not every chapter in turn.
+*Why:* the catalog, the book's page, search results and the book's repository show it beside the other books'. *Check:* `re-check manifest` notes a summary far from the usual length (`[summary]` in `data/writing.toml`) and never fails for it; critic for the rest.
+
 ## 2. Structure
 
 **W-4 The whole result first.** Chapter 1 builds a rough but working version of the book's end result, end to end. Each later chapter makes one part of it solid. Chapter 1's title names what the reader builds or the question it answers, in the book's own terms, as "Predicting the next word" does. Never call it "end to end": that describes every first chapter, so it says nothing about this one.
@@ -89,7 +92,7 @@ A chapter may skip a part. It never adds others: no history lessons, no "fun fac
 ## 4. Examples
 
 **W-17 Every example runs.** Examples use pinned versions, run offline and are deterministic, with fixed seeds. The output in the book is the output the example produced.
-*Why:* this is the promise on every stamp. *Check:* lint (`re-check examples`).
+*Why:* this is the promise on every stamp. *Check:* lint (`re-check examples`); while a book that started from the kit is drafted, `re-check style` also refuses examples that read the clock or the memory in use, print an unordered result (a set, a directory listing, workers' results as they finish) without sorting it, or import a numerical library before `lib`, which fixes threads and seeds first.
 
 **W-18 One idea per example.** Keep an example to about 30 lines. Longer setup moves into a shared module the reader can open.
 *Why:* the reader should see the idea, not the scaffolding. *Check:* lint for length (`re-check style`); critic for the idea.

@@ -55,12 +55,18 @@ jobs:
             *) echo "examples-scope is all or affected, not '$SCOPE'" >&2; exit 1 ;;
           esac
 
+  # With its history and the pull request's base, so a rule with a date (data/rules.toml) can tell whether this change
+  # makes the book's next content edition, and when its text last changed: until then such a rule only warns.
   manifest:
     name: manifest
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/checkout@v4
         with:
           repository: rollingedition/standards
@@ -73,13 +79,13 @@ jobs:
         if: ${{ !env.RE_LOCAL }}
         run: pip install --quiet -e ./.standards
       - name: Validate book.toml against the taxonomy
-        run: re-check manifest --book .
+        run: re-check manifest --book . --base-ref "$BASE_SHA"
       - name: Check the generated front page (README, CITATION.cff, licences)
         run: re-check readme --book .
       - name: Check the book for text addressed to an AI system
-        run: re-check addressed --book .
+        run: re-check addressed --book . --base-ref "$BASE_SHA"
       - name: Check the agent skill's procedures
-        run: re-check skill --book .
+        run: re-check skill --book . --base-ref "$BASE_SHA"
 
   section-ids:
     name: section-ids

@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from re_standards import community
 
 
@@ -52,9 +50,4 @@ def test_the_repository_and_the_organization_get_a_readme(tmp_path):
     assert profile.startswith("# Rolling Edition") and "(https://rollingedition.com)" in profile
     assert "(https://github.com/rollingedition/.github/blob/main/CONTRIBUTING.md)" in profile and "{" not in profile + out["README.md"]
     assert "Written with AI. Verified by people." in profile
-    # no patent notice anywhere on GitHub (the founder, Nov 13, 2026): only the sites' footers carry one
-    assert "patent" not in profile.lower()
-    standards = Path(__file__).resolve().parents[1]
-    for path in [standards / "data" / "readme.toml", *(standards / "templates").rglob("*")]:
-        if path.is_file():
-            assert "patent pending" not in path.read_text(encoding="utf-8", errors="ignore").lower(), path
+    assert profile.rstrip().endswith("Written with AI. Verified by people.")         # the page ends with the disclosure

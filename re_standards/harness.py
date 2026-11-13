@@ -1,12 +1,13 @@
 """Runs one example inside its pinned runtime and reports what it actually ran against.
 
-Copied next to the examples and run as `python -I .re_harness.py EXAMPLE.py`. The example's stdout
+Copied next to the examples and run as `python -B -P -s .re_harness.py EXAMPLE.py`, in the clean environment the
+runner gives it (examples._clean_env), which sets the hash seed and the threads. The example's stdout
 passes straight through; the report (Python version, the distributions it loaded and the ones it
 imports directly) goes to the file named by RE_EXAMPLE_REPORT. Standard library only, and it must run
 on every Python version a book may pin.
 
-`python -I .re_harness.py --metadata` runs no example: it reports what the runtime has installed (installed()), which
-the choice of the examples a change to the pins could affect reads (affected.py).
+`python -B -P -s .re_harness.py --metadata` runs no example: it reports what the runtime has installed (installed()),
+which the choice of the examples a change to the pins could affect reads (affected.py).
 """
 import ast
 import importlib.metadata as metadata
@@ -135,8 +136,8 @@ def main():
         source = f.read()
     code = 0
     sys.argv = [path]
-    # -I keeps the user's environment out, and with it the script's own folder; put that back, as a plain
-    # `python example.py` would, so examples can import shared modules such as examples/lib/.
+    # -P keeps the script's own folder off the path; put the example's back, as a plain `python example.py` would, so
+    # examples can import shared modules such as examples/lib/.
     sys.path.insert(0, os.path.dirname(os.path.abspath(path)))
     try:
         runpy.run_path(path, run_name="__main__")

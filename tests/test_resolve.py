@@ -125,9 +125,11 @@ def test_the_resolver_reads_only_pins_a_backend_is_about_to_install(tmp_path, mo
     venv = examples.VenvBackend()
     assert examples.check_pins(rt, venv).outcome == "ok" and len(calls) == 1
     venv.env_dir(rt).mkdir(parents=True)
-    (venv.env_dir(rt) / ".ready").write_text("{}")                              # built before: its pins installed
-    assert examples.check_pins(rt, venv) is None and len(calls) == 1
-    assert examples.check_pins(rt, examples.ContainerBackend()).outcome == "ok" and len(calls) == 2
+    (venv.env_dir(rt) / ".ready").write_text("{}")                              # built before, another way: again
+    assert examples.check_pins(rt, venv).outcome == "ok" and len(calls) == 2
+    (venv.env_dir(rt) / ".ready").write_text(json.dumps({"build": examples.VENV_BUILD}))   # built: its pins installed
+    assert examples.check_pins(rt, venv) is None and len(calls) == 2
+    assert examples.check_pins(rt, examples.ContainerBackend()).outcome == "ok" and len(calls) == 3
 
 
 # ---------------------------------------------------------------- uv's messages, in plain words

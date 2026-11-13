@@ -8,11 +8,14 @@ The pinned runtime is two files in the book repo, and a third for a book whose e
 
 Backends build that runtime differently:
 
-    venv       local: uv builds a virtual environment with a managed CPython; the network is blocked
-               with `unshare -rn`. Where the kernel won't allow that, it refuses to run rather than run online,
-               unless RE_EXAMPLES_ALLOW_NETWORK=1 says so, and the runtime then records the network as open
-    container  CI and Cloud Run: the image built from runtime/Dockerfile, run with --network none; with
-               RE_EXAMPLES_REGISTRY set, pulled from that registry, or built and pushed there once
+    venv       local: uv builds a virtual environment with a managed CPython, its bytecode compiled as it installs;
+               the network is blocked with `unshare -rn`. Where the kernel won't allow that, it refuses to run rather
+               than run online, unless RE_EXAMPLES_ALLOW_NETWORK=1 says so, and the runtime then records the network
+               as open. Built once and kept; `fresh` builds it in a new folder, for a check that nothing a runtime
+               gathered over earlier runs makes an example pass
+    container  CI and Cloud Run: the image built from runtime/Dockerfile on the pinned base (base_image.py), run
+               with --network none; with RE_EXAMPLES_REGISTRY set, pulled from that registry, or built and pushed
+               there once
     host       tests only: the current interpreter, nothing installed
 
 Before a backend that installs the pins builds the runtime, a resolver reads them (resolve.py). Pins that can't be
@@ -21,6 +24,11 @@ reported as an example's failure or as a build's last lines.
 
 Each example runs in a scratch copy of examples/, so it can't change the repo and its output never
 contains repository paths. Only stdout is compared, after trimming trailing spaces and blank lines.
+
+Every backend starts it the same way (RUN_FLAGS, _clean_env): `python -B -P -s .re_harness.py EXAMPLE.py`, in a clean
+environment that the interpreter honours, with the hash seed, no bytecode written and every numeric library's threads
+fixed ([run] in data/examples.toml). So a run never changes the runtime, and the machine's CPUs never change an output.
+With more than one seed (`seeds`), each example runs under each, and passes only when every run prints the same.
 """
 from __future__ import annotations
 
@@ -37,7 +45,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from . import models as model_files, resolve
+from . import base_image, models as model_files, resolve
 from .bookfmt import Book
 
 HARNESS = Path(__file__).with_name("harness.py")
@@ -49,10 +57,25 @@ INDEX = re.compile(r"^--extra-index-url\s+(\S+)$")     # an index beside PyPI, f
 BEST_MATCH = ["--index-strategy", "unsafe-best-match"]   # with an extra index, uv reads all of them, as pip does
 
 
-def extra_indexes_allowed() -> list[str]:
+def _examples_data() -> dict:
     import tomllib
     from . import data_path
-    return tomllib.loads(data_path("examples.toml").read_text(encoding="utf-8"))["runtime"]["extra_indexes"]
+    return tomllib.loads(data_path("examples.toml").read_text(encoding="utf-8"))
+
+
+def extra_indexes_allowed() -> list[str]:
+    return _examples_data()["runtime"]["extra_indexes"]
+
+
+def run_settings() -> dict:
+    """[run]: how every runner starts an example (data/examples.toml)."""
+    return _examples_data()["run"]
+
+
+# How every runner starts Python for an example, the platform's too: -B writes no bytecode, so a run never changes the
+# runtime; -P keeps the script's own folder off the path and -s the user's site-packages, as -I would. Unlike -I, the
+# environment is read, and it's _clean_env's alone, so its PYTHONHASHSEED takes effect.
+RUN_FLAGS = ("-B", "-P", "-s")
 
 
 class ExamplesError(RuntimeError):
@@ -140,6 +163,8 @@ class ExampleResult:
     versions: dict = field(default_factory=dict)
     direct: list = field(default_factory=list)
     seconds: float = 0.0
+    seeds: list = field(default_factory=list)      # the hash seeds it ran under, the first one's output kept here
+    seed_diff: str = ""                            # how another seed's output differed from the first's, if it did
 
     def manifest_entry(self) -> dict:
         return {"passing": self.passing, "versions": self.versions, "direct": self.direct}
@@ -193,36 +218,47 @@ class Backend:
     def prepare(self, runtime: Runtime) -> None:
         pass
 
-    def command(self, runtime: Runtime, workdir: Path, example: str) -> tuple[list[str], dict]:
+    def cleanup(self) -> None:
+        """What a run leaves behind once it's done: nothing, but for a fresh venv's folder."""
+
+    def command(self, runtime: Runtime, workdir: Path, example: str, seed: int | None = None) -> tuple[list[str], dict]:
         raise NotImplementedError
 
     def describe(self, runtime: Runtime) -> dict:
         out = {"backend": self.name, "python": runtime.python, "key": runtime.key,
-               "requirements_sha256": hashlib.sha256(runtime.requirements.encode()).hexdigest()}
+               "requirements_sha256": hashlib.sha256(runtime.requirements.encode()).hexdigest(),
+               "threads": int(run_settings()["threads"])}
         if runtime.models:
             out["models_sha256"] = model_files.digest(runtime.model_list())
         return out
 
 
-THREAD_VARS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
+# Each numeric library's own thread count: OpenMP's (PyTorch's intra-op threads and LightGBM's follow it, and Arrow's
+# pool), OpenBLAS's, MKL's, Polars' and Rayon's (tokenizers, Delta Lake).
+THREAD_VARS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "POLARS_MAX_THREADS", "RAYON_NUM_THREADS")
+KERNEL_VARS = {"openblas_coretype": "OPENBLAS_CORETYPE", "mkl_cbwr": "MKL_CBWR"}
 
 
-def _thread_caps() -> dict:
-    """When this process may run on fewer CPUs than the machine has, as under taskset or a container's cpuset, cap the
-    numeric libraries' threads at that number. OpenBLAS and OpenMP otherwise start a thread for every CPU in the
-    machine, and pinned runs sharing a few CPUs slow past the timeout. An unpinned run, such as CI's, gets no cap and
-    runs exactly as before, so no recorded output can change with it."""
-    try:
-        allowed = len(os.sched_getaffinity(0))
-    except AttributeError:                                  # no CPU affinity on this platform, such as macOS
-        return {}
-    return {name: str(allowed) for name in THREAD_VARS} if allowed < (os.cpu_count() or allowed) else {}
+def thread_env(settings: dict | None = None) -> dict:
+    """Every numeric library's threads at [run] threads, whatever the machine has, and the BLAS kernels where [run] pins
+    them: a sum split across a different number of threads, or done by another CPU's kernel, rounds differently. On fewer
+    CPUs than that, an example runs slower and prints the same."""
+    s = settings or run_settings()
+    threads = int(s["threads"])
+    if threads < 1:
+        raise ExamplesError("[run] threads in data/examples.toml must be 1 or more")
+    env = {name: str(threads) for name in THREAD_VARS}
+    env.update({var: str(s[key]) for key, var in KERNEL_VARS.items() if s.get(key)})
+    return env
 
 
-def _clean_env(extra: dict) -> dict:
-    # Nothing from the caller's environment reaches an example: no user name, home folder or tokens.
+def _clean_env(extra: dict, seed: int | None = None) -> dict:
+    """The only environment an example sees: nothing from the caller's, so no user name, home folder or tokens; the
+    hash seed ([run] seed unless `seed` says), and the threads (thread_env)."""
+    s = run_settings()
     env = {"PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC",
-           "PYTHONHASHSEED": "0", "PYTHONIOENCODING": "utf-8", "PYTHONDONTWRITEBYTECODE": "1", **_thread_caps()}
+           "PYTHONHASHSEED": str(int(s["seed"] if seed is None else seed)), "PYTHONIOENCODING": "utf-8",
+           "PYTHONDONTWRITEBYTECODE": "1", **thread_env(s)}
     env.update(extra)
     return env
 
@@ -253,50 +289,82 @@ def credential_free_env(environ: dict | None = None) -> dict[str, str]:
     return {k: v for k, v in source.items() if not holds_credential(k, v)}
 
 
+# How the venv backend builds a runtime: its .ready file names it, and one built another way is built again. 2: the
+# packages' bytecode compiled as uv installs them, and the standard library's once (Nov 12, 2026).
+VENV_BUILD = 2
+COMPILE_STDLIB = ("import compileall, re, sysconfig; compileall.compile_dir(sysconfig.get_path('stdlib'), quiet=1, "
+                  "workers=0, rx=re.compile('bad_coding|badsyntax|site-packages|lib2to3/tests/data'))")   # as the image's
+
+
 class VenvBackend(Backend):
     name = "venv"
 
-    def __init__(self, block_network: bool = True):
+    def __init__(self, block_network: bool = True, fresh: bool = False):
         allow = os.environ.get("RE_EXAMPLES_ALLOW_NETWORK") == "1"
         self.block_network = block_network and not (allow and not can_block_network())
+        self.fresh: Path | None = None
+        if fresh:                                   # a new folder, so nothing an earlier run left is in the runtime
+            env_root().mkdir(parents=True, exist_ok=True)
+            self.fresh = Path(tempfile.mkdtemp(prefix="fresh-", dir=env_root()))
 
     def env_dir(self, runtime: Runtime) -> Path:
-        return env_root() / f"py{runtime.python}-{runtime.key}"
+        return (self.fresh or env_root()) / f"py{runtime.python}-{runtime.key}"
 
     def ready(self, runtime: Runtime) -> bool:
-        return (self.env_dir(runtime) / ".ready").exists()
+        marker = self.env_dir(runtime) / ".ready"
+        try:
+            return json.loads(marker.read_text()).get("build") == VENV_BUILD
+        except (OSError, ValueError, AttributeError):
+            return False
+
+    def cleanup(self) -> None:
+        if self.fresh:
+            shutil.rmtree(self.fresh, ignore_errors=True)
 
     def prepare(self, runtime: Runtime) -> None:
         target = self.env_dir(runtime)
-        if (target / ".ready").exists():
+        if self.ready(runtime):
             return
-        shutil.rmtree(target, ignore_errors=True)     # a half-built runtime is rebuilt from scratch
+        shutil.rmtree(target, ignore_errors=True)     # a half-built runtime, or one built another way, is built again
         target.parent.mkdir(parents=True, exist_ok=True)
-        uv = _uv()
+        uv, python = _uv(), str(target / "bin" / "python")
         steps = [uv + ["venv", "--quiet", "--python", runtime.python, "--python-preference", "only-managed", str(target)]]
         if runtime.pins():
             req = target.parent / f"{target.name}.requirements.txt"
             req.write_text(runtime.requirements)
-            steps.append(uv + ["pip", "install", "--quiet", "--python", str(target / "bin" / "python"), "-r", str(req),
+            # Compiled as installed, as pip does in the image: a run that compiled a package itself would print its
+            # warnings (torchao's SyntaxWarning, Nov 12, 2026) and take seconds longer, and only on a runtime's first run
+            steps.append(uv + ["pip", "install", "--quiet", "--compile-bytecode", "--python", python, "-r", str(req),
                                *(BEST_MATCH if runtime.indexes() else [])])
         for step in steps:
             r = subprocess.run(step, capture_output=True, text=True, env=credential_free_env())
             if r.returncode != 0:
                 raise ExamplesError(f"could not build the pinned runtime: {r.stderr.strip()[-2000:]}")
+        self.compile_stdlib(python)
         if runtime.models:
+            shared = env_root() / target.name / "hf"
+            if self.fresh and shared.is_dir():          # the same pinned files, copied rather than downloaded again;
+                shutil.copytree(shared, self.models_dir(runtime), dirs_exist_ok=True)   # every hash is checked below
             try:
                 model_files.fetch(runtime.model_list(), self.models_dir(runtime))
             except (OSError, ValueError) as e:
                 raise ExamplesError(f"could not fetch the pinned model files: {e}") from None
-        (target / ".ready").write_text(json.dumps(self.describe(runtime)))   # written last: the runtime is complete
+        # written last: the runtime is complete, and built this way
+        (target / ".ready").write_text(json.dumps(dict(self.describe(runtime), build=VENV_BUILD)))
+
+    @staticmethod
+    def compile_stdlib(python: str) -> None:
+        """The managed CPython's standard library compiled, which uv's install leaves to the first import. Shared by
+        every runtime on its Python and maybe not ours to write, so a failure only leaves it to compile in memory."""
+        subprocess.run([python, "-I", "-c", COMPILE_STDLIB], capture_output=True, text=True, env=credential_free_env())
 
     def models_dir(self, runtime: Runtime) -> Path:
         """The runtime's Hugging Face cache, beside its venv: where its examples find their models offline."""
         return self.env_dir(runtime) / "hf"
 
-    def command(self, runtime: Runtime, workdir: Path, example: str) -> tuple[list[str], dict]:
+    def command(self, runtime: Runtime, workdir: Path, example: str, seed: int | None = None) -> tuple[list[str], dict]:
         python = self.env_dir(runtime) / "bin" / "python"
-        cmd = [str(python), "-I", ".re_harness.py", example]
+        cmd = [str(python), *RUN_FLAGS, ".re_harness.py", example]
         if self.block_network:
             if not can_block_network():                 # fail closed: never run an example online by accident
                 raise ExamplesError("the network can't be blocked here: `unshare -rn` isn't allowed (on Ubuntu 24.04, "
@@ -304,10 +372,12 @@ class VenvBackend(Backend):
                                     "RE_EXAMPLES_ALLOW_NETWORK=1 to run with the network open, for local use only")
             cmd = ["unshare", "-rn"] + cmd
         extra = model_files.env(self.models_dir(runtime)) if runtime.models else {}
-        return cmd, _clean_env({"HOME": str(workdir), "RE_EXAMPLE_REPORT": str(workdir / ".re_report.json"), **extra})
+        return cmd, _clean_env({"HOME": str(workdir), "RE_EXAMPLE_REPORT": str(workdir / ".re_report.json"), **extra},
+                               seed)
 
     def describe(self, runtime: Runtime) -> dict:
-        return dict(super().describe(runtime), network="blocked" if self.block_network else "open")
+        return dict(super().describe(runtime), network="blocked" if self.block_network else "open",
+                    **({"fresh": True} if self.fresh else {}))
 
 
 class HostBackend(Backend):
@@ -315,20 +385,33 @@ class HostBackend(Backend):
     name = "host"
     installs = False
 
-    def command(self, runtime: Runtime, workdir: Path, example: str) -> tuple[list[str], dict]:
-        return [sys.executable, "-I", ".re_harness.py", example], \
-            _clean_env({"HOME": str(workdir), "RE_EXAMPLE_REPORT": str(workdir / ".re_report.json")})
+    def command(self, runtime: Runtime, workdir: Path, example: str, seed: int | None = None) -> tuple[list[str], dict]:
+        return [sys.executable, *RUN_FLAGS, ".re_harness.py", example], \
+            _clean_env({"HOME": str(workdir), "RE_EXAMPLE_REPORT": str(workdir / ".re_report.json")}, seed)
 
 
-def dockerfile_key() -> str:
-    """The runtime Dockerfile's own hash: an image is built from it as well as from the pins, so a changed
-    Dockerfile gets new images rather than a cached one built from the old file."""
-    return hashlib.sha256(DOCKERFILE.read_bytes()).hexdigest()[:8]
+def base_for(python: str) -> dict:
+    """runtime/Dockerfile's base for this Python, by digest, and its packages at their versions (base_image.entry)."""
+    try:
+        return base_image.entry(python)
+    except base_image.BaseImageError as e:
+        raise ExamplesError(str(e)) from None
 
 
-def models_dockerfile_key() -> str:
-    """For a runtime with models: the hash of both image definitions and the fetch, which build its image together."""
-    h = hashlib.sha256()
+def _base_key(python: str) -> bytes:
+    return json.dumps(base_for(python), sort_keys=True).encode()
+
+
+def dockerfile_key(python: str) -> str:
+    """The image definition's hash: the runtime Dockerfile and the base it's built on for this Python, by digest, with
+    its packages' versions (base_image.py). An image is built from them as well as from the pins, so a changed
+    Dockerfile or a new base gets new images rather than a cached one built from the old."""
+    return hashlib.sha256(DOCKERFILE.read_bytes() + b"\0" + _base_key(python)).hexdigest()[:8]
+
+
+def models_dockerfile_key(python: str) -> str:
+    """For a runtime with models: the hash of both image definitions, the base and the fetch, which build its image."""
+    h = hashlib.sha256(_base_key(python) + b"\0")
     for path in (DOCKERFILE, MODELS_DOCKERFILE, FETCH_MODELS):
         h.update(path.read_bytes() + b"\0")
     return h.hexdigest()[:8]
@@ -337,7 +420,8 @@ def models_dockerfile_key() -> str:
 class ContainerBackend(Backend):
     """CI and Cloud Run: an image per runtime, built from runtime/Dockerfile and run without a network.
 
-    The image is tagged by its pins and the Dockerfile: `re-examples:py{python}-{runtime key}-{Dockerfile hash}`.
+    The image is tagged by its pins and its definition: `re-examples:py{python}-{runtime key}-{definition hash}`, the
+    definition being the Dockerfile and its pinned base (dockerfile_key).
     With a registry (`registry`, or RE_EXAMPLES_REGISTRY, such as `{region}-docker.pkg.dev/{project}/runtime`),
     images are a cache every run shares: `prepare` pulls `{registry}/{tag}` and only when that fails builds it and
     pushes it, so each runtime is built once. The caller signs the engine in to the registry first. A failed push
@@ -357,7 +441,7 @@ class ContainerBackend(Backend):
     def tag(self, runtime: Runtime) -> str:
         """The image's name without a registry: the same locally and in CI, so it's what a description records. Its
         last part is the image definition's hash, which affected.py compares between runs."""
-        definition = models_dockerfile_key() if runtime.models else dockerfile_key()
+        definition = models_dockerfile_key(runtime.python) if runtime.models else dockerfile_key(runtime.python)
         return f"{self.repository}:py{runtime.python}-{runtime.key}-{definition}"
 
     def image(self, runtime: Runtime) -> str:
@@ -370,12 +454,13 @@ class ContainerBackend(Backend):
     def build_command(self, runtime: Runtime, context: Path) -> list[str]:
         """The pins' image. For a runtime with models, the base that models_build_command's layer goes on."""
         target = self.base_image(runtime) if runtime.models else self.image(runtime)
-        return [self.engine, "build", "--quiet", "-f", str(DOCKERFILE), "--build-arg", f"PYTHON_VERSION={runtime.python}",
-                "-t", target, str(context)]
+        base = base_for(runtime.python)
+        return [self.engine, "build", "--quiet", "-f", str(DOCKERFILE), "--build-arg", f"BASE={base['image']}",
+                "--build-arg", f"PACKAGES={' '.join(base['packages'])}", "-t", target, str(context)]
 
     def base_image(self, runtime: Runtime) -> str:
         """A local name for the pins' image under a runtime with models: built, never pushed."""
-        return f"{self.repository}-base:py{runtime.python}-{runtime.key}-{dockerfile_key()}"
+        return f"{self.repository}-base:py{runtime.python}-{runtime.key}-{dockerfile_key(runtime.python)}"
 
     def models_build_command(self, runtime: Runtime, context: Path) -> list[str]:
         return [self.engine, "build", "--quiet", "-f", str(MODELS_DOCKERFILE), "--build-arg", f"BASE={self.base_image(runtime)}",
@@ -406,17 +491,19 @@ class ContainerBackend(Backend):
                 print(f"warning: could not push {self.image(runtime)}, so the next run builds it again: "
                       f"{r.stderr.strip()[-500:]}", file=sys.stderr)
 
-    def command(self, runtime: Runtime, workdir: Path, example: str) -> tuple[list[str], dict]:
+    def command(self, runtime: Runtime, workdir: Path, example: str, seed: int | None = None) -> tuple[list[str], dict]:
         extra = model_files.env(model_files.settings()["image_cache"]) if runtime.models else {}
-        inside = {k: v for k, v in _clean_env({"HOME": "/work", "RE_EXAMPLE_REPORT": "/work/.re_report.json", **extra}).items()
+        inside = {k: v for k, v in _clean_env({"HOME": "/work", "RE_EXAMPLE_REPORT": "/work/.re_report.json", **extra},
+                                              seed).items()
                   if k != "PATH"}               # the image's own PATH finds its Python
         user = ["--user", f"{os.getuid()}:{os.getgid()}"] if hasattr(os, "getuid") else []
         return [self.engine, "run", "--rm", "--network", "none", *user, "-v", f"{workdir}:/work", "-w", "/work",
                 *[x for k, v in sorted(inside.items()) for x in ("-e", f"{k}={v}")], self.image(runtime),
-                "python", "-I", ".re_harness.py", example], _clean_env({})
+                "python", *RUN_FLAGS, ".re_harness.py", example], _clean_env({})
 
     def describe(self, runtime: Runtime) -> dict:
-        return dict(super().describe(runtime), image=self.tag(runtime), network="none")
+        return dict(super().describe(runtime), image=self.tag(runtime), network="none",
+                    base=base_for(runtime.python)["image"])
 
 
 def build_failure(stderr: str) -> str:
@@ -435,9 +522,11 @@ def build_failure(stderr: str) -> str:
     return ("\n".join(pip[:30]) + "\n" + tail) if pip else stderr.strip()[-2000:]
 
 
-def backend_named(name: str, block_network: bool = True) -> Backend:
+def backend_named(name: str, block_network: bool = True, fresh: bool = False) -> Backend:
     if name == "venv":
-        return VenvBackend(block_network)
+        return VenvBackend(block_network, fresh=fresh)
+    if fresh:
+        raise ValueError("only the venv backend builds a fresh runtime: a container's image is the same on every run")
     if name == "container":
         return ContainerBackend()
     if name == "host":
@@ -459,19 +548,62 @@ def check_pins(runtime: Runtime, backend: Backend) -> resolve.Resolution | None:
     return found
 
 
+def parse_seeds(text: str | None) -> list[int]:
+    """`0,1` as [0, 1]: the hash seeds a run uses, each once, in order. None or empty: [run] seed alone."""
+    if not text:
+        return [int(run_settings()["seed"])]
+    try:
+        seeds = [int(x) for x in text.split(",") if x.strip()]
+    except ValueError:
+        raise ExamplesError(f"--seeds takes whole numbers separated by commas, such as 0,1, not {text!r}") from None
+    if not seeds or any(not 0 <= x <= 4294967295 for x in seeds) or len(set(seeds)) != len(seeds):
+        raise ExamplesError(f"--seeds takes different whole numbers from 0 to 4294967295, such as 0,1, not {text!r}")
+    return seeds
+
+
 def run_examples(book: Book, backend: Backend, timeout: float = 120, only: list[str] | None = None,
-                 prepared: bool = False, jobs: int = 1, seconds: dict[str, float] | None = None
-                 ) -> tuple[list[ExampleResult], dict]:
+                 prepared: bool = False, seeds: list[int] | None = None, jobs: int = 1,
+                 seconds: dict[str, float] | None = None) -> tuple[list[ExampleResult], dict]:
     """Every example, or those in `only`, in the pinned runtime. `prepared` says the caller has already read the pins and
-    built the runtime (as the choice of affected examples does, to read what it installs). With `jobs` above 1, up to
-    that many run side by side, packed by `seconds`, each one's time in the last run (side_by_side)."""
+    built the runtime (as the choice of affected examples does, to read what it installs). With `seeds`, each example
+    runs once under each hash seed, the first one's output compared with the book's, and passes only when every
+    seed's output is the same as that one's (same_under_seeds). With `jobs` above 1, up to that many run side by side,
+    packed by `seconds`, each one's time in the last run (side_by_side)."""
     runtime = read_runtime(book.root)
     if not prepared:
         check_pins(runtime, backend)
         backend.prepare(runtime)
+    seeds = list(seeds) if seeds else [int(run_settings()["seed"])]
+
+    def one(eid: str) -> ExampleResult:
+        first = run_one(book, eid, runtime, backend, timeout, seeds[0])
+        return same_under_seeds(first, [run_one(book, eid, runtime, backend, timeout, seed) for seed in seeds[1:]])
+
     ids = [eid for eid in sorted(book.examples) if not only or eid in only]
-    results = side_by_side(ids, lambda eid: run_one(book, eid, runtime, backend, timeout), jobs, seconds or {}, timeout)
-    return results, backend.describe(runtime)
+    results = side_by_side(ids, one, jobs, seconds or {}, timeout)
+    described = backend.describe(runtime)
+    return results, (dict(described, seeds=seeds) if len(seeds) > 1 else described)
+
+
+def same_under_seeds(first: ExampleResult, others: list[ExampleResult]) -> ExampleResult:
+    """`first` fails when another seed's run ended differently or printed anything else: Python's string hashing, and so
+    the order of a set or of a dict built from one, changes with the seed, and a reader's own Python picks a random
+    seed for every run. Its seed_diff says how."""
+    for other in others:
+        first.seeds.extend(other.seeds)
+        if first.seed_diff:
+            continue
+        a, b = normalize_output(first.stdout), normalize_output(other.stdout)
+        if a != b or first.exit_code != other.exit_code:
+            seed_a, seed_b = first.seeds[0], other.seeds[0]
+            diff = "\n".join(difflib.unified_diff(a.splitlines(), b.splitlines(),
+                                                  f"{first.example_id} (PYTHONHASHSEED={seed_a})",
+                                                  f"{first.example_id} (PYTHONHASHSEED={seed_b})", lineterm=""))
+            ended = "" if first.exit_code == other.exit_code else \
+                f"exit code {first.exit_code} under seed {seed_a}, {other.exit_code} under seed {seed_b}\n"
+            first.seed_diff = f"the output depends on the hash seed:\n{ended}{diff}".rstrip()
+            first.passing = False
+    return first
 
 
 def installed(runtime: Runtime, backend: Backend, timeout: float = 120) -> dict:
@@ -493,13 +625,15 @@ def installed(runtime: Runtime, backend: Backend, timeout: float = 120) -> dict:
         return json.loads(report.read_text(encoding="utf-8"))
 
 
-def run_one(book: Book, eid: str, runtime: Runtime, backend: Backend, timeout: float) -> ExampleResult:
+def run_one(book: Book, eid: str, runtime: Runtime, backend: Backend, timeout: float,
+            seed: int | None = None) -> ExampleResult:
     example = book.examples[eid]
+    seed = int(run_settings()["seed"]) if seed is None else seed
     with tempfile.TemporaryDirectory(prefix="re-example-") as tmp:
         work = Path(tmp) / "examples"
         shutil.copytree(book.root / "examples", work, ignore=shutil.ignore_patterns("*.out", "__pycache__", ".python-version", "requirements.txt"))
         shutil.copy(HARNESS, work / ".re_harness.py")
-        cmd, env = backend.command(runtime, work, f"{eid}.py")
+        cmd, env = backend.command(runtime, work, f"{eid}.py", seed)
         start = time.monotonic()
         try:
             r = subprocess.run(cmd, cwd=work, env=env, capture_output=True, text=True, timeout=timeout)
@@ -515,7 +649,7 @@ def run_one(book: Book, eid: str, runtime: Runtime, backend: Backend, timeout: f
     tail = "\n".join(stderr.strip().splitlines()[-15:])
     return ExampleResult(eid, passing=(code == 0 and same), exit_code=code, stdout=stdout, expected=example.expected,
                          diff=diff if code == 0 else "", stderr_tail=tail, versions=versions,
-                         direct=report.get("direct", []), seconds=seconds)
+                         direct=report.get("direct", []), seconds=seconds, seeds=[seed])
 
 
 def results_json(results: list[ExampleResult], runtime: dict, outcome: str | None = None) -> dict:

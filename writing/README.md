@@ -91,8 +91,8 @@ A chapter may skip a part. It never adds others: no history lessons, no "fun fac
 
 ## 4. Examples
 
-**W-17 Every example runs.** Examples use pinned versions, run offline and are deterministic, with fixed seeds. The output in the book is the output the example produced.
-*Why:* this is the promise on every stamp. *Check:* lint (`re-check examples`); while a book that started from the kit is drafted, `re-check style` also refuses examples that read the clock or the memory in use, print an unordered result (a set, a directory listing, workers' results as they finish) without sorting it, or import a numerical library before `lib`, which fixes threads and seeds first.
+**W-17 Every example runs.** Examples use pinned versions, run offline and are deterministic, with fixed seeds. Their output doesn't depend on Python's hash seed: sort a set, or anything built from one, before printing it. The output in the book is the output the example produced.
+*Why:* this is the promise on every stamp, and a reader's Python picks a new hash seed for every run. *Check:* lint (`re-check examples`; a draft's under two hash seeds, `--seeds 0,1`); while a book that started from the kit is drafted, `re-check style` also refuses examples that read the clock or the memory in use, print an unordered result (a set, a directory listing, workers' results as they finish) without sorting it, or import a numerical library before `lib`, which fixes threads and seeds first.
 
 **W-18 One idea per example.** Keep an example to about 30 lines. Longer setup moves into a shared module the reader can open.
 *Why:* the reader should see the idea, not the scaffolding. *Check:* lint for length (`re-check style`); critic for the idea.

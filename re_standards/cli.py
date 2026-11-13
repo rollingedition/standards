@@ -17,7 +17,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import addressed as addressed_check, affected, bookfmt, catalog, checks, community, data_path, examples, kit, readme, resolve, rules, skill, spoken, style
+from . import addressed as addressed_check, affected, base_image, bookfmt, catalog, checks, community, data_path, examples, kit, readme, resolve, rules, skill, spoken, style
 from . import models as model_files
 
 
@@ -163,11 +163,23 @@ def runtime_or_none(book) -> dict:
 
 def cmd_examples(args) -> int:
     book = bookfmt.load_book(Path(args.book))
-    backend = examples.backend_named(args.backend or os.environ.get("RE_EXAMPLES_BACKEND", "container"),
-                                     block_network=os.environ.get("RE_EXAMPLES_NETWORK", "blocked") == "blocked")
-    selection, chosen = None, {}
     if (args.list or args.base_ref or args.recorded) and not args.affected:
         return report("Examples", ["--list, --base-ref and --recorded go with --affected"], "")
+    try:
+        seeds = examples.parse_seeds(args.seeds)
+        backend = examples.backend_named(args.backend or os.environ.get("RE_EXAMPLES_BACKEND", "container"),
+                                         block_network=os.environ.get("RE_EXAMPLES_NETWORK", "blocked") == "blocked",
+                                         fresh=args.fresh)
+    except (examples.ExamplesError, ValueError) as e:
+        return report("Examples", [str(e)], "")
+    try:
+        return run_examples_check(args, book, backend, seeds)
+    finally:
+        backend.cleanup()                          # a fresh runtime's folder goes once its run is done
+
+
+def run_examples_check(args, book: bookfmt.Book, backend: examples.Backend, seeds: list[int]) -> int:
+    selection, chosen = None, {}
     try:
         only, prepared = args.only.split(",") if args.only else None, False
         if args.affected:
@@ -179,7 +191,7 @@ def cmd_examples(args) -> int:
             results, runtime = [], (backend.describe(examples.read_runtime(book.root)) if only == [] else {})
         else:
             results, runtime = examples.run_examples(book, backend, timeout=args.timeout, only=only, prepared=prepared,
-                                                     jobs=args.jobs, seconds=seconds_from(args.seconds))
+                                                     seeds=seeds, jobs=args.jobs, seconds=seconds_from(args.seconds))
     except examples.UnsatisfiablePins as e:
         # Nothing was built and no example ran: a resolver's verdict, never an example's failure.
         found = e.resolution
@@ -197,20 +209,22 @@ def cmd_examples(args) -> int:
     problems = []
     for r in results:
         label = examples.describe_versions(r.versions, r.direct)
-        if args.record and r.exit_code == 0:
+        if args.record and r.exit_code == 0 and not r.seed_diff:
             (book.root / "examples" / f"{r.example_id}.out").write_text(examples.normalize_output(r.stdout), encoding="utf-8")
             print(f"recorded  {r.example_id}  ({label})")
             continue
         print(f"{'pass' if r.passing else 'FAIL'}  {r.example_id}  ({label})  {r.seconds:.1f}s")
         if not r.passing:
-            detail = r.diff or r.stderr_tail or f"exit code {r.exit_code}"
+            detail = r.diff or (r.seed_diff if r.exit_code == 0 else "") or r.stderr_tail or f"exit code {r.exit_code}"
             problems.append(f"{r.example_id} fails on {label}:\n" + "\n".join("      " + x for x in detail.splitlines()))
     if not args.record:
         problems += book.output_problems
     outcome = "recorded" if args.record else ("passed" if not problems else "failed")
     write_report(args, examples.results_json(results, runtime, outcome) | chosen)
     passing = sum(r.passing for r in results)
-    where = f"Python {runtime['python']}, {runtime['backend']} runtime"
+    where = f"Python {runtime['python']}, {runtime['backend']} runtime" + \
+        (f", hash seeds {', '.join(map(str, seeds))}" if len(seeds) > 1 else "") + \
+        (", built fresh" if runtime.get("fresh") else "")
     if args.record:
         return report("Examples", problems, f"recorded the output of {len(results)} examples ({where})")
     if selection and not selection.everything:
@@ -323,6 +337,24 @@ def cmd_models(args) -> int:
                   f"full commit with every file's SHA-256: {', '.join(m.repo for m in current)}")
 
 
+def cmd_base_image(args) -> int:
+    if args.python and not args.refresh:
+        return report("Base image", ["--python goes with --refresh"], "")
+    if args.refresh:
+        try:
+            new, changed = base_image.refresh(add=args.python)
+        except (base_image.BaseImageError, OSError, ValueError, KeyError) as e:
+            return report("Base image", [f"couldn't refresh: {e}"], "")
+        text = base_image.to_toml(new, base_image.header(base_image.path().read_text(encoding="utf-8")))
+        base_image.path().write_text(text, encoding="utf-8")
+        print("\n".join(changed) or "nothing changed")
+    data = base_image.load()
+    pinned = [f"Python {v} on {p['debian']}" for v, p in sorted(data.get("python", {}).items())]
+    return report("Base image", base_image.problems(data),
+                  f"{len(pinned)} Python base image(s) pinned by digest ({', '.join(pinned)}), with "
+                  f"{', '.join(data['packages'])} pinned on each")
+
+
 def cmd_licences(args) -> int:
     problems = readme.check_own_licences(write=args.write)
     return report("Licences", problems, "this repository's LICENSE and LICENSE-TEXT are " + ("written" if args.write else "up to date"))
@@ -385,6 +417,10 @@ def build_parser() -> argparse.ArgumentParser:
                                                          "within --timeout, runs alone (default 1: one at a time)")
     s.add_argument("--seconds", help="with --jobs: an earlier run's --report, or an edition's examples.json, for each "
                                      "example's time")
+    s.add_argument("--seeds", help="comma-separated hash seeds, such as 0,1: each example runs under each, and fails "
+                                   "when any output differs (default: [run] seed alone)")
+    s.add_argument("--fresh", action="store_true", help="with the venv backend: build the runtime in a new folder, used "
+                                                        "for this run alone, instead of the one kept")
     s.set_defaults(fn=cmd_examples)
 
     s = sub.add_parser("style", help="the lint rules of the writing standards: lengths, time words, typed versions, bindings, banned words")
@@ -444,6 +480,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--files", help="comma-separated file names to pin, in place of the default patterns")
     s.add_argument("--include", help="comma-separated patterns for top-level files, in place of [models] default_files")
     s.set_defaults(fn=cmd_models)
+
+    s = sub.add_parser("base-image", help="the runtime image's base, pinned by digest with its packages' versions "
+                                          "(data/runtime-base.toml); --refresh rewrites it (needs the internet)")
+    s.add_argument("--refresh", action="store_true", help="each Python's digest from Docker Hub and each package's "
+                                                          "version from Debian, written back")
+    s.add_argument("--python", action="append", metavar="VERSION",
+                   help="with --refresh: add this Python, such as 3.13.17")
+    s.set_defaults(fn=cmd_base_image)
 
     s = sub.add_parser("licences", help="this repository's own licences: LICENSE (MIT, the code) and LICENSE-TEXT (CC BY 4.0, writing/ and prompts/)")
     s.add_argument("--write", action="store_true", help="regenerate the files instead of checking them")

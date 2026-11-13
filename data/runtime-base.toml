@@ -1,0 +1,26 @@
+# The base every book's runtime image is built FROM (runtime/Dockerfile, examples.ContainerBackend): Docker's official
+# python:{version}-slim for each Python a book pins, by the digest of its multi-platform index, with the Debian release
+# it's built on; and the Debian packages the image adds, each at its version on that release. The packages: GNU OpenMP,
+# which LightGBM, XGBoost and other OpenMP builds load, and GNU atomics, which regopy's native library links against and
+# its wheel doesn't bundle; the slim image leaves both out. So the same pins always get the same operating system: a tag
+# such as python:3.12.15-slim moves whenever Docker rebuilds it (its OS layer changed between Nov 2 and Nov 3, 2026).
+# The digests below are the ones every runtime image since Nov 3, 2026 was built from, as their provenance records.
+#
+# An image's tag hashes the entry its build used, so a change here builds new images, and a runtime image for a Python
+# missing here isn't built. `re-check base-image --refresh` rewrites this file from Docker Hub and Debian's package
+# index, keeping these lines; `--python VERSION` adds a Python a book has started to pin.
+
+image = "python:{python}-slim"
+packages = ["libgomp1", "libatomic1"]
+
+[python."3.12.15"]
+digest = "sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704"
+debian = "trixie"
+
+[python."3.13.16"]
+digest = "sha256:cf50a4f6ac4f026458b08d5222023d700ac806410dff5e9ca8728fa44f2b850f"
+debian = "trixie"
+
+[debian.trixie]
+libatomic1 = "14.2.0-19"
+libgomp1 = "14.2.0-19"

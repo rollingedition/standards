@@ -40,9 +40,9 @@ def test_without_a_registry_it_builds_every_time_and_never_pushes(engine, monkey
     fake = engine()
     backend.prepare(RT)
     assert fake.verbs == ["build"]
-    assert backend.image(RT) == backend.tag(RT) == f"re-examples:py3.12.15-{RT.key}-{examples.dockerfile_key()}"
+    assert backend.image(RT) == backend.tag(RT) == f"re-examples:py3.12.15-{RT.key}-{examples.dockerfile_key('3.12.15')}"
     build = fake.calls[0]
-    assert build[build.index("-t") + 1] == backend.image(RT) and f"PYTHON_VERSION={RT.python}" in build
+    assert build[build.index("-t") + 1] == backend.image(RT) and f"BASE={examples.base_for(RT.python)['image']}" in build
 
 
 def test_the_registry_comes_from_the_environment(monkeypatch):

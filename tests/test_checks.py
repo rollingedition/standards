@@ -161,14 +161,60 @@ def test_examples_run_in_a_scratch_copy_with_a_clean_environment(tmp_path, monke
     assert not (root / "examples" / "scribble.txt").exists()
 
 
-def test_a_run_pinned_to_fewer_cpus_caps_the_numeric_libraries_threads(monkeypatch):
-    """Under taskset, OpenBLAS and OpenMP would still start a thread per CPU in the machine; an unpinned run is untouched."""
-    monkeypatch.setattr(examples.os, "cpu_count", lambda: 32)
-    monkeypatch.setattr(examples.os, "sched_getaffinity", lambda pid: {0, 1, 2, 3}, raising=False)
-    env = examples._clean_env({})
-    assert [env[v] for v in examples.THREAD_VARS] == ["4", "4", "4"]
-    monkeypatch.setattr(examples.os, "sched_getaffinity", lambda pid: set(range(32)), raising=False)
-    assert not set(examples.THREAD_VARS) & set(examples._clean_env({}))
+def test_every_run_sets_the_same_threads_whatever_the_machine_has(monkeypatch):
+    """A sum split across another number of threads rounds differently, so the count is [run]'s on every machine,
+    pinned to a few CPUs or not; the BLAS kernels join it only when [run] pins them."""
+    threads = str(examples.run_settings()["threads"])
+    for cpus in (2, 4, 32):
+        monkeypatch.setattr(examples.os, "cpu_count", lambda: cpus)
+        monkeypatch.setattr(examples.os, "sched_getaffinity", lambda pid: set(range(cpus)), raising=False)
+        env = examples._clean_env({})
+        assert [env[v] for v in examples.THREAD_VARS] == [threads] * len(examples.THREAD_VARS)
+    assert {"OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"} <= set(examples.THREAD_VARS)
+    pinned = examples.thread_env({"threads": 2, "openblas_coretype": "Haswell", "mkl_cbwr": ""})
+    assert pinned["OPENBLAS_CORETYPE"] == "Haswell" and "MKL_CBWR" not in pinned and pinned["OMP_NUM_THREADS"] == "2"
+    with pytest.raises(examples.ExamplesError, match="1 or more"):
+        examples.thread_env({"threads": 0})
+
+
+def test_the_seed_and_the_threads_take_effect_in_a_run(tmp_path):
+    """The flags honour the clean environment, as -I didn't: the hash printed twice is the same, under each seed its
+    own; no bytecode is written; and the example's folder is on the path, the user's site isn't."""
+    code = ("import os, sys\nprint(hash('abc'))\nprint(os.environ['PYTHONHASHSEED'], os.environ['OMP_NUM_THREADS'])\n"
+            "f = sys.flags\nprint(f.dont_write_bytecode, f.no_user_site, f.safe_path, f.ignore_environment)\n"
+            "import lib\nprint(lib.VALUE)\n")
+    root = pinned(make_book(tmp_path, examples={"seeded": (code, "")}))
+    (root / "examples" / "lib.py").write_text("VALUE = 'local module'\n")
+    book = bookfmt.load_book(root)
+    rt = examples.read_runtime(root)
+    runs = [examples.run_one(book, "seeded", rt, examples.HostBackend(), 60, seed) for seed in (0, 0, 1)]
+    assert all(r.exit_code == 0 for r in runs), runs[0].stderr_tail
+    first, again, other = (r.stdout.splitlines() for r in runs)
+    assert first == again                                                  # the same hash on every run
+    assert first[0] != other[0] and other[1].startswith("1 ")              # and another under another seed
+    assert first[1] == f"0 {examples.run_settings()['threads']}" and first[2] == "1 1 True 0"
+    assert first[3] == "local module"
+    assert not list((root / "examples").rglob("__pycache__"))
+
+
+def test_two_seeds_fail_an_example_whose_output_depends_on_the_seed(tmp_path):
+    ordered = "print(sorted({'pear', 'apple', 'fig', 'kiwi', 'plum'}))\n"
+    unordered = "print(list({'pear', 'apple', 'fig', 'kiwi', 'plum', 'lime', 'date', 'yuzu'}))\n"
+    root = pinned(make_book(tmp_path, examples={"ordered": (ordered, "['apple', 'fig', 'kiwi', 'pear', 'plum']\n"),
+                                               "unordered": (unordered, None)}))
+    book = bookfmt.load_book(root)
+    one, _ = examples.run_examples(book, examples.HostBackend(), only=["unordered"])
+    (root / "examples" / "unordered.out").write_text(one[0].stdout)          # recorded under seed 0
+    book = bookfmt.load_book(root)
+    results, runtime = examples.run_examples(book, examples.HostBackend(), seeds=[0, 1])
+    by = {r.example_id: r for r in results}
+    assert by["ordered"].passing and by["ordered"].seeds == [0, 1] and not by["ordered"].seed_diff
+    assert not by["unordered"].passing and by["unordered"].diff == ""     # seed 0 still matches the book
+    assert "PYTHONHASHSEED=1" in by["unordered"].seed_diff and runtime["seeds"] == [0, 1]
+    assert examples.parse_seeds("0,1") == [0, 1] and examples.parse_seeds(None) == [examples.run_settings()["seed"]]
+    for bad in ("0,0", "a", "-1", ","):
+        with pytest.raises(examples.ExamplesError, match="--seeds"):
+            examples.parse_seeds(bad)
 
 
 def test_unpinned_runtimes_are_rejected(tmp_path):
@@ -189,9 +235,15 @@ def test_container_backend_builds_from_the_same_pins_and_runs_offline(tmp_path):
     rt = examples.Runtime("3.12.15", "pandas==2.2.2\n")
     backend = examples.ContainerBackend()
     build = backend.build_command(rt, tmp_path)
-    assert "PYTHON_VERSION=3.12.15" in build and build[-1] == str(tmp_path)
+    base = examples.base_for("3.12.15")
+    assert f"BASE={base['image']}" in build and build[-1] == str(tmp_path)
+    assert base["image"].startswith("python:3.12.15-slim@sha256:") and f"PACKAGES={' '.join(base['packages'])}" in build
+    assert all("=" in p for p in base["packages"])                         # each Debian package at its version
     run, _ = backend.command(rt, tmp_path, "load-orders.py")
     assert run[:5] == ["docker", "run", "--rm", "--network", "none"] and backend.image(rt) in run
+    assert run[run.index(backend.image(rt)) + 1:] == ["python", "-B", "-P", "-s", ".re_harness.py", "load-orders.py"]
+    with pytest.raises(examples.ExamplesError, match="no pinned base image"):
+        backend.tag(examples.Runtime("3.12.4", "pandas==2.2.2\n"))
     assert examples.DOCKERFILE.exists()
 
 
@@ -257,7 +309,7 @@ def test_a_runtime_is_built_without_the_callers_credentials(tmp_path, monkeypatc
         return subprocess.CompletedProcess(cmd, 0, "", "")
     monkeypatch.setattr(examples.subprocess, "run", fake_run)
     examples.VenvBackend(block_network=False).prepare(examples.Runtime("3.12.15", "six==1.16.0\n"))
-    assert len(seen) == 2 and all(e is not None and "ANTHROPIC_API_KEY" not in e for e in seen)
+    assert len(seen) == 3 and all(e is not None and "ANTHROPIC_API_KEY" not in e for e in seen)   # venv, install, stdlib
     got = []
     monkeypatch.setattr(examples.resolve, "check", lambda *a, **k: got.append(k.get("env")) or examples.resolve.Resolution("ok"))
     examples.check_pins(examples.Runtime("3.12.16", "six==1.16.0\n"), examples.VenvBackend(block_network=False))

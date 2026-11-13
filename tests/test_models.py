@@ -169,8 +169,8 @@ def test_a_runtime_without_models_keeps_its_key_and_image_and_one_with_models_ge
     assert with_models.key != plain.key and with_models.model_list()[0].repo == REPO
     assert examples.HostBackend().describe(with_models)["models_sha256"] == models.digest(with_models.model_list())
     backend = examples.ContainerBackend(registry="")
-    assert backend.tag(plain).endswith(f"-{plain.key}-{examples.dockerfile_key()}")
-    assert backend.tag(with_models).endswith(f"-{with_models.key}-{examples.models_dockerfile_key()}")
+    assert backend.tag(plain).endswith(f"-{plain.key}-{examples.dockerfile_key('3.12.15')}")
+    assert backend.tag(with_models).endswith(f"-{with_models.key}-{examples.models_dockerfile_key('3.12.15')}")
     with pytest.raises(examples.ExamplesError, match="full 40-character commit"):
         examples.read_runtime(book_root(tmp_path / "c", entry(revision="main")))
 
@@ -185,7 +185,8 @@ def test_only_a_listed_index_may_join_pypi_and_uv_then_reads_every_index(tmp_pat
     monkeypatch.setattr(examples.subprocess, "run", lambda cmd, **k: calls.append(cmd) or fake_uv(cmd))
     monkeypatch.setenv("RE_EXAMPLES_ENV_DIR", str(tmp_path / "envs"))
     examples.VenvBackend(block_network=False).prepare(rt)
-    assert calls[-1][-2:] == examples.BEST_MATCH
+    install = next(c for c in calls if "install" in c)
+    assert install[-2:] == examples.BEST_MATCH and "--compile-bytecode" in install
 
 
 def test_the_venv_fetches_the_models_beside_itself_and_its_examples_read_them_offline(tmp_path, monkeypatch):

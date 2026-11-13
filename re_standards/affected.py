@@ -46,6 +46,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import data_path
 from .bookfmt import Book
 from .examples import DOCKERFILE, HARNESS, Runtime
 
@@ -60,7 +61,9 @@ RUNS_FILES = {"run_path", "run_module", "spec_from_file_location", "spec_from_lo
               "load_module", "exec_module", "load_source"}
 STARTS_PROGRAMS = {"subprocess", "pty"}                       # modules whose use starts another program
 OS_STARTS = re.compile(r"^(system|popen|exec[lv]p?e?|spawn[lv]p?e?|posix_spawnp?|startfile)$")
-RUNNER_FILES = (HARNESS, Path(__file__).with_name("examples.py"), DOCKERFILE)
+# How examples run: the harness, the runner, the image's definition and its pinned base, and [run]'s seed and threads
+RUNNER_FILES = (HARNESS, Path(__file__).with_name("examples.py"), DOCKERFILE, Path(__file__).with_name("base_image.py"),
+                data_path("examples.toml"), data_path("runtime-base.toml"))
 
 
 def norm(name: str) -> str:
@@ -68,8 +71,9 @@ def norm(name: str) -> str:
 
 
 def runner_key() -> str:
-    """A hash of the code that runs the examples: the harness, the runner and the runtime image's definition. A record
-    that keeps it says which ran, so a later selection can tell when it changed."""
+    """A hash of the code that runs the examples: the harness, the runner, the runtime image's definition and base, and
+    the settings every run starts with. A record that keeps it says which ran, so a later selection can tell when it
+    changed."""
     h = hashlib.sha256()
     for path in RUNNER_FILES:
         h.update(path.name.encode() + b"\0" + path.read_bytes() + b"\0")

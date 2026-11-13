@@ -32,3 +32,26 @@ image_cache = "/opt/re/hf"
 # runtime here can use. The pins stay exact; uv then reads every index for the best match, as pip does.
 [runtime]
 extra_indexes = ["https://download.pytorch.org/whl/cpu"]
+
+# How every runner starts an example: the harness's backends here, and the platform's, which take these values from here
+# (the Lab's worker, its release check and its assignments, the members' runtime). Each example runs as
+# `python -B -P -s .re_harness.py EXAMPLE.py` in a clean environment: no bytecode written, no script folder or user site
+# on the path, and the environment honoured, so PYTHONHASHSEED and the thread counts below take effect. `-I` would
+# ignore every PYTHON* variable, which left string hashing, and so set order, random on every run until Nov 12, 2026.
+[run]
+# Every numeric library's threads, whatever the machine has: OpenMP (and so PyTorch's own and LightGBM's), OpenBLAS,
+# MKL, Polars and Rayon. A sum split across threads rounds differently with each count: np.dot printed different last
+# digits at 1, 2, 4 and 16 threads. 4: Release, the release service, the drafting sessions and GitHub's runners each
+# have 4 vCPUs, so the outputs books recorded there hold. On fewer CPUs an example runs slower, never differently.
+threads = 4
+# The hash seed an example runs under (PYTHONHASHSEED). `re-check examples --seeds 0,1` runs each one under each seed
+# given and fails when any output differs, since a reader's own Python picks a random seed every run.
+seed = 0
+# BLAS kernels, pinned only when not empty: OPENBLAS_CORETYPE names OpenBLAS's kernel instead of the one it picks for the
+# CPU, and MKL_CBWR MKL's code path. A kernel changes a sum's last digits as threads do, so a CPU with AVX-512, such as
+# Release's, could print what one without doesn't. A pin must name a kernel every runner's CPU has: forcing one it lacks
+# crashes the example. Haswell's needs AVX2 and FMA, which every runner has (Release's and the Labs' c3d, the e2
+# machines, GitHub's runners), and it's the kernel the books' outputs pass on where AVX-512 is missing. MKL (PyTorch's)
+# isn't pinned: what MKL_CBWR does on AMD's CPUs couldn't be measured, and the books pass on Release's c3d as they are.
+openblas_coretype = "Haswell"
+mkl_cbwr = ""

@@ -50,8 +50,10 @@ seed = 0
 # BLAS kernels, pinned only when not empty: OPENBLAS_CORETYPE names OpenBLAS's kernel instead of the one it picks for the
 # CPU, and MKL_CBWR MKL's code path. A kernel changes a sum's last digits as threads do, so a CPU with AVX-512, such as
 # Release's, could print what one without doesn't. A pin must name a kernel every runner's CPU has: forcing one it lacks
-# crashes the example. Haswell's needs AVX2 and FMA, which every runner has (Release's and the Labs' c3d, the e2
-# machines, GitHub's runners), and it's the kernel the books' outputs pass on where AVX-512 is missing. MKL (PyTorch's)
-# isn't pinned: what MKL_CBWR does on AMD's CPUs couldn't be measured, and the books pass on Release's c3d as they are.
-openblas_coretype = "Haswell"
+# crashes the example. Neither is pinned. Haswell's kernel, pinned on Nov 13, 2026, passed every book on an Intel CPU,
+# but on GitHub's AMD runner Language Models' svd-neighbours (a full SVD of a large matrix) crashed with a segmentation
+# fault, though it had passed there unpinned. A pin comes back only after every book's examples pass under it on AMD's
+# CPUs, Release's c3d among them. Unpinned, the books pass on Release's c3d and GitHub's runners, as before the pin. MKL
+# (PyTorch's) isn't pinned either: what MKL_CBWR does on AMD's CPUs couldn't be measured.
+openblas_coretype = ""
 mkl_cbwr = ""

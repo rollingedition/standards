@@ -17,4 +17,11 @@ undated_through = "W-60"
 content = ["prose", "code"]
 
 [rules]
-# "W-61" = { since = "2026-11-20", what = "..." }
+"W-61" = { since = "2026-11-13", what = "lead with the point, then the number; no bound yes or no" }
+"W-62" = { since = "2026-11-13", what = "cite the way a textbook does" }
+"W-63" = { since = "2026-11-13", what = "vary the way in; no stock openers or repeated sentences" }
+"W-64" = { since = "2026-11-13", what = "introduce the case once per chapter, in that chapter's terms" }
+"W-65" = { since = "2026-11-13", what = "the problem before the protocol" }
+"W-66" = { since = "2026-11-13", what = "say a caveat once" }
+"W-67" = { since = "2026-11-13", what = "write as the author" }
+"W-68" = { since = "2026-11-13", what = "every example explains itself: a docstring, and comments on the why" }

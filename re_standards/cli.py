@@ -249,9 +249,12 @@ def cmd_style(args) -> int:
     words = sum(len(style.WORD.findall(t)) for c in book.chapters for _, t in style._prose_lines(c.body, c.body_offset))
     skipped = f" (skipping {', '.join(sorted(skip))})" if skip else ""
     skipped += f" (with {', '.join(args.limit)})" if args.limit else ""
-    return report_dated("Writing standards", problems,
-                        f"{len(book.chapters)} chapter(s), {words:,} words of prose: the lint rules of the writing "
-                        "standards pass" + skipped, book.root, book.manifest, args.base_ref)
+    rc = report_dated("Writing standards", problems,
+                      f"{len(book.chapters)} chapter(s), {words:,} words of prose: the lint rules of the writing "
+                      "standards pass" + skipped, book.root, book.manifest, args.base_ref)
+    if again := style.check_warnings(book, cfg, skip=skip):     # never fails: what a writer should read again
+        report("Writing standards, to read again", again, "", warn=True)
+    return rc
 
 
 def cmd_addressed(args) -> int:

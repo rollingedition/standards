@@ -25,7 +25,8 @@ The export has {{{{out:count:unreadable amounts}}}} unreadable amounts, checked 
 **Working rule:** Coerce, count, then decide.
 '''
 
-COUNT = ('print("unreadable amounts:", 1)\nprint("rows:", 9)\n', "unreadable amounts: 1\nrows: 9\n")
+COUNT = ('"""Count the rows whose amount is unreadable."""\nprint("unreadable amounts:", 1)\nprint("rows:", 9)\n',
+         "unreadable amounts: 1\nrows: 9\n")
 
 
 def book_with(tmp_path, chapter=CHAPTER, examples=None, pins="pandas==2.2.2\n"):
@@ -270,3 +271,119 @@ def test_a_book_may_keep_its_own_length_limits(tmp_path, capsys):
         assert cli.main(["style", "--book", str(longer.root), "--limit", bad]) == 1
         assert "--limit" in capsys.readouterr().err
     assert style.with_limits(style.load_config(), ["example_lines=50"])[0]["length"]["example_lines"] == 50
+
+
+# ---------------------------------------------------------------- section 14, Narrative (W-61 to W-68; Nov 13, 2026)
+
+def more_chapters(book, *openings):
+    """The book with more chapters, each opening with the given text; reloaded."""
+    for i, text in enumerate(openings, 2):
+        (book.root / "chapters" / f"0{i}-more-{i}.md").write_text(
+            f"---\nchapter_id: more-{i}\n---\n\n# More {i}\n\n{text}\n\n## Part {i} {{#part-{i}}}\n\n{LONG}\n\n"
+            "**Working rule:** Keep going.\n")
+    return bookfmt.load_book(book.root)
+
+
+CHECK = ('"""Check the export twice, and count what it holds."""\nprint("same as before:", True)\n'
+         + "".join(f'print("n{i}:", {i})\n' for i in range(6)),
+         "same as before: True\n" + "".join(f"n{i}: {i}\n" for i in range(6)))
+
+
+def test_a_bound_yes_or_no_fails_and_a_ledger_of_numbers_warns(tmp_path):
+    """W-61: a yes or no is asserted, never bound into the prose; more than 4 bound numbers in a paragraph is a
+    warning to lead with the point."""
+    chapter = CHAPTER.replace(LONG + "\n\n[Example", "The second run agrees: {{out:check:same as before}}.\n\n"
+                              + " ".join(f"It holds {{{{out:check:n{i}}}}} of kind {i}." for i in range(5))
+                              + "\n\n" + " ".join(f"It holds {{{{out:check:n{i}}}}}." for i in range(4)) + "\n\n[Example")
+    book = book_with(tmp_path, chapter=chapter, examples={"count": COUNT, "check": CHECK})
+    problems = lint(book)
+    assert [p for p in problems if "W-61" in p] == [
+        'chapters/01-first-steps.md:11: W-61: {{out:check:same as before}} puts "True" in the prose; assert it in the '
+        "example and state it as a fact, or print a word the sentence can use"]
+    warned = style.check_warnings(book)
+    assert [p.split(" bound")[0] for p in warned if "W-61" in p] == ["chapters/01-first-steps.md:13: W-61: 5"]
+    assert all(p.endswith("(a warning: read it again)") for p in warned)
+    assert style.check_warnings(book, skip={"W-61"}) == [p for p in warned if "W-61" not in p]
+
+
+def test_quotations_and_links_warn_past_their_limits(tmp_path):
+    """W-62: one quotation of 4 words or more in a paragraph, a quoted term doesn't count; 2 links in a sentence."""
+    one = 'The guide says "rank by what the shopper meant" for this case, and calls it "intent".'
+    two = 'The guide says "rank by what the shopper meant" and "count every result as judged".'
+    links = "See [one](https://example.org/1), [two](https://example.org/2) and [three](https://example.org/3)."
+    chapter = CHAPTER.replace(LONG + "\n\n[Example", f"{one}\n\n{two}\n\n{links}\n\n[Example")
+    warned = [p for p in style.check_warnings(book_with(tmp_path, chapter=chapter)) if "W-62" in p]
+    assert len(warned) == 2
+    assert warned[0].startswith("chapters/01-first-steps.md:13: W-62: 2 quotations in one paragraph")
+    assert warned[1].startswith("chapters/01-first-steps.md:15: W-62: 3 links in one sentence")
+
+
+def test_a_stock_opener_or_phrase_fails_past_twice_in_a_chapter(tmp_path):
+    """W-63: "For the store," and its kin open at most two sentences in a chapter; "as here" appears at most twice."""
+    three = " ".join(f"For the store, take product {i}." for i in range(3))
+    book = book_with(tmp_path, chapter=CHAPTER.replace(LONG + "\n\n[Example", three + "\n\n[Example"))
+    found = [p for p in lint(book) if "W-63" in p]
+    assert len(found) == 1 and found[0].startswith('chapters/01-first-steps.md:11: W-63: "For the store," 3 times in '
+                                                   "this chapter (lines 11, 11, 11), 2 at most")
+    two = " ".join(f"In the store, take product {i}." for i in range(2)) + " Measure it, as here. Count it, as here."
+    assert not [p for p in lint(book_with(tmp_path / "b", chapter=CHAPTER.replace(LONG + "\n\n[Example", two + "\n\n[Example")))
+                if "W-63" in p]
+    thrice = "Measure it, as here. Count it, as here. Sort it, as here."
+    assert any('W-63: "as here" 3 times' in p
+               for p in lint(book_with(tmp_path / "c", chapter=CHAPTER.replace(LONG + "\n\n[Example", thrice + "\n\n[Example"))))
+
+
+def test_a_long_sentence_said_twice_in_the_book_fails_unless_its_words_are_a_sources(tmp_path):
+    """W-63: a sentence of 12 words or more says its thing once in a book; a source quoted twice is the source's."""
+    said = "A check that runs only when someone remembers to run it is a report, and reports go unread."
+    quoted = 'The law says "the withdrawal of consent shall not affect the lawfulness of processing based on it".'
+    book = more_chapters(book_with(tmp_path), f"{said} {quoted}", f"{said} {quoted}")
+    found = [p for p in lint(book) if "W-63" in p]
+    assert len(found) == 1                                                  # the quoted law isn't flagged
+    assert found[0].startswith("chapters/03-more-3.md:7: W-63: this sentence is also at chapters/02-more-2.md:7: "
+                               '"A check that runs only when someone remembers to run it is a report')
+
+
+def test_a_sentence_opening_shared_by_three_chapters_fails_but_the_promise_doesnt(tmp_path):
+    """W-64: the same ten opening words in three chapters are a template; W-2's promise opens every chapter."""
+    case = "The platform, the online learning platform this book follows, sells courses about {}."
+    promise = "By the end of this chapter you can find the {} in any table you're given."
+    book = more_chapters(book_with(tmp_path), *(f"{promise.format(w)} {case.format(w)}" for w in ("cats", "dogs", "owls")))
+    found = [p for p in lint(book) if "W-64" in p]
+    assert found == ['chapters/02-more-2.md:7: W-64: 3 chapters open a sentence with "The platform the online learning '
+                     'platform this book follows sells" (chapters/02-more-2.md:7, chapters/03-more-3.md:7, '
+                     "chapters/04-more-4.md:7); write each in that chapter's own words"]
+    assert not [p for p in lint(more_chapters(book_with(tmp_path / "b"), case.format("cats"), case.format("dogs")))
+                if "W-64" in p]                                                        # two chapters: not yet a template
+
+
+def test_an_example_needs_a_docstring_and_its_comments_dont_count_toward_its_length(tmp_path):
+    """W-68 and W-18: a docstring opens every example, and neither it nor a comment line counts toward the limit;
+    an index with a literal offset and no comment near it is a warning."""
+    bare = ('ids = [1, 2, 3]\nprint("rest:", ids[0 + 1:])\n', "rest: [2, 3]\n")
+    commented = ('"""What follows the first id.\n\nTwo lines of docstring."""\n'
+                 + "".join(f"# a note on step {i}\nx{i} = {i}\n" for i in range(38))
+                 + 'ids = [1, 2, 3]\nprint("rest:", ids[0 + 1:])                # the ids after the start marker\n',
+                 "rest: [2, 3]\n")
+    book = book_with(tmp_path, examples={"count": COUNT, "bare": bare, "commented": commented})
+    problems = lint(book)
+    assert [p for p in problems if "W-68" in p] == [
+        "examples/bare.py: W-68: open the example with a docstring of one or two sentences: what it shows, and which "
+        "printed line the prose's point rests on"]
+    assert not [p for p in problems if "W-18" in p]                         # 40 lines of code, 38 comments aside
+    assert style.narrative.code_lines(commented[0]) == 40
+    warned = [p for p in style.check_warnings(book) if "W-68" in p]
+    assert warned == ["examples/bare.py:2: W-68: an index with an offset, ids[0 + 1:]; say why in a comment on its line, "
+                      "in the prose's words (a warning: read it again)"]
+
+
+def test_re_check_style_lists_what_to_read_again_and_still_passes(tmp_path, capsys):
+    from re_standards import cli
+    chapter = CHAPTER.replace(LONG + "\n\n[Example", 'He wrote "rank by what the shopper meant" and "count every result '
+                              'as judged".\n\n[Example')
+    book = book_with(tmp_path, chapter=chapter)
+    assert cli.main(["style", "--book", str(book.root), "--skip", "W-7"]) == 0
+    err = capsys.readouterr().err
+    assert "Writing standards, to read again: 1 warning(s)" in err and "W-62: 2 quotations" in err
+    assert cli.main(["style", "--book", str(book.root), "--skip", "W-7,W-62"]) == 0
+    assert "to read again" not in capsys.readouterr().err

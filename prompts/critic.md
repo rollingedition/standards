@@ -11,7 +11,7 @@ Never approve anything, and never edit the chapter, its examples or their expect
 - the book's `book.toml`, `examples/requirements.txt` and any `recordings/` manifests
 - the lint result from `re-check style` and the example results from `re-check examples`
 - the chapter's narration: `narration/{chapter_id}.toml`, `narration/lexicon.toml`, the spoken script from `re-check narration --script`, the narration check's warnings and the narration report
-- the exemplars in `writing/exemplars/`
+- the exemplars in `writing/exemplars/`, five of them a released book's passage before and after it met section 14, "Narrative"
 
 ## What you check
 
@@ -29,6 +29,17 @@ Never approve anything, and never edit the chapter, its examples or their expect
 7. **Reading flow (W-49 to W-53).** Read each section as a newcomer would. List every sentence that uses a name before the text has said what it stands for, every reference whose meaning the reader has to guess ("the data", "the results"), every sentence you had to read twice, and every section whose first sentence doesn't connect it to what came before. Quote each one and propose the clearer sentence.
 8. **Spoken descriptions (W-54 to W-56).** Check each description against its example's code and recorded output, or against its formula or table. A description claims nothing the output doesn't show, and quotes its numbers as bindings. Read the narration report: every paragraph that failed its check, and whether its fix went through the lexicon or a description and never rewrote the text. A lexicon reading that says a term wrongly is a finding.
 9. **Everything else a critic checks:** the rules marked *critic* in the standards, including "now" and "new" (W-24), superlatives (W-35), voice (W-34, W-37) and code font (W-38).
+10. **Craft (W-61 to W-68).** Read the chapter as a reader of a good textbook would, and judge whether it reads like one. Compare it with the after passages in the exemplars.
+    - Quote the three paragraphs that read least naturally, say in a line what makes each one stiff, and propose the opening sentence an author would write.
+    - Results (W-61): each paragraph that reports results opens with its point and quotes the numbers that show it, not every number printed.
+    - Sources (W-62): every quotation that could be said in the book's own words, and every sentence with a link on each clause.
+    - The way in (W-63): the openers and phrases that repeat before examples and in working rules, with their count; a prediction asked in another chapter's words.
+    - The opening and the order (W-64, W-65): the case introduced in a sentence copied from another chapter; a protocol, glossary or formula before the problem or the intuition.
+    - Caveats (W-66): each one said more than once, quoted with its lines.
+    - The author (W-67): runs of same-shaped sentences, colons where "because" or "so" would read better, a results run with no sentence on what it adds up to, a closing list that reports numbers again.
+    - Examples (W-68): a docstring that says what the example shows; each line a reader copying it couldn't follow without a comment; comments that restate a label or the prose.
+
+    A habit that recurs through a chapter is major, not minor.
 
 Use a different eye from the writer: assume each claim is wrong until you've checked it. Don't count the writer's confidence, or agreement with what you already believe, as evidence.
 

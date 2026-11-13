@@ -12,7 +12,7 @@ import tomllib
 import unicodedata
 from pathlib import Path
 
-from . import data_path
+from . import data_path, narrative
 from .bookfmt import BINDING, HEADING_ID, Book
 
 WORD = re.compile(r"[A-Za-z0-9][A-Za-z0-9'’\-]*")
@@ -178,6 +178,13 @@ def check_style(book: Book, cfg: dict | None = None, skip: set[str] | frozenset[
     return [p for p in problems if rule_of(p) not in skip] if skip else problems
 
 
+def check_warnings(book: Book, cfg: dict | None = None, skip: set[str] | frozenset[str] = frozenset()) -> list[str]:
+    """What the lint asks a writer to read again, which never fails the check: a paragraph of many bound numbers,
+    quotations and links (W-61, W-62), an index with an unexplained offset (W-68). Rules in `skip` are left out."""
+    found = narrative.warnings(book, cfg or load_config())
+    return [p for p in found if rule_of(p) not in skip] if skip else found
+
+
 def _check_style(book: Book, cfg: dict | None = None) -> list[str]:
     cfg = cfg or load_config()
     problems: list[str] = []
@@ -263,13 +270,14 @@ def _check_style(book: Book, cfg: dict | None = None) -> list[str]:
         problems += _working_rules(c.file, c.body, c.body_offset, cfg["working_rule"])
 
     problems += [f"W-26: {p}" for p in book.binding_problems()]
+    problems += narrative.problems(book, cfg)
 
     limit = lengths["example_lines"]
     for eid, ex in book.examples.items():
-        lines = [line for line in ex.code.split("\n") if line.strip()]
-        if len(lines) > limit:
-            problems.append(f"{ex.file}: W-18: {len(lines)} lines; keep an example to about 30 (limit {limit}) "
-                            "and move setup into a shared module")
+        lines = narrative.code_lines(ex.code)          # its docstring and comment lines don't count (W-68)
+        if lines > limit:
+            problems.append(f"{ex.file}: W-18: {lines} lines, its docstring and comments aside; keep an example to "
+                            f"about 30 (limit {limit}) and move setup into a shared module")
 
     problems += check_recordings(book.root, cfg)
     if status == "draft":                       # the kit (kit.py) holds the drafts it started; a released book's pull

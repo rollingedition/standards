@@ -120,12 +120,12 @@ def test_the_first_commit_alone_says_nothing_so_a_copy_from_a_tarball_isnt_read_
 
 def test_re_check_style_lists_a_dated_rule_as_a_warning_on_a_released_book(tmp_path, dated, capsys):
     root = released_repo(tmp_path)
-    assert cli.main(["style", "--book", str(root), "--skip", "W-7,W-10"]) == 0
+    assert cli.main(["style", "--book", str(root), "--skip", "W-7,W-10,W-68"]) == 0    # its example has no docstring
     err = capsys.readouterr().err
     assert "Writing standards, rules this book takes with its next content edition: 1 warning(s)" in err
     assert "W-35: \"simply\" is a banned word (a rule since Nov 20, 2026" in err
     (root / "chapters" / "01-first-steps.md").write_text(BANNED + "\nAn edit.\n")
-    assert cli.main(["style", "--book", str(root), "--skip", "W-7,W-10"]) == 1    # this change makes the next edition
+    assert cli.main(["style", "--book", str(root), "--skip", "W-7,W-10,W-68"]) == 1    # this change makes the next edition
 
 
 def test_the_rules_data_dates_every_rule_after_the_undated_ones():
@@ -140,7 +140,7 @@ def test_the_rules_data_dates_every_rule_after_the_undated_ones():
     missing = sorted(f"W-{n}" for n in written if n > last and f"W-{n}" not in days)
     assert not missing, f"date these rules in data/rules.toml: {missing}"
     for rid, entry in (cfg.get("rules") or {}).items():
-        assert rules.RULE.fullmatch(rid) and entry.get("what") and dt.date.fromisoformat(str(entry["since"]))
+        assert rules.RULE.match(rid + ":") and entry.get("what") and dt.date.fromisoformat(str(entry["since"]))
     assert data_path("rules.toml").is_file()
 
 

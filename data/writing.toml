@@ -32,6 +32,22 @@ chapter_title_avoid = ["end to end", "end-to-end"]
 label = "Working rule"
 retired = ["What to do"]       # earlier labels: re-check style asks for the new one, and the sites still style them
 
+[narrative]                    # W-61 to W-68, section 14: the habits a review of the released books measured (Nov 13, 2026)
+paragraph_bindings = 4         # W-61: more bound numbers than this in one paragraph is a warning: lead with the point
+yes_no = ["True", "False"]     # W-61: values a binding never puts in the prose; assert them, or print a word
+quotes_per_paragraph = 1       # W-62: more quotations than this in one paragraph is a warning
+quote_words = 4                #       a quotation counts from this many words, so a quoted term doesn't
+links_per_sentence = 2         # W-62: more links than this in one sentence is a warning
+stock_uses = 2                 # W-63: the most times a chapter may use each stock opener or phrase below
+# W-63: openers that mark a step instead of making a sentence, as regular expressions matched where a sentence starts
+stock_openers = ['(?:For|In|On) the [a-z]+,', 'The examples? ', 'Asked whether ']
+# W-63: phrases that point a working rule back at its own section, matched anywhere, in any case
+stock_phrases = ['\bas here\b', '\bas (?:this|the) example does\b']
+repeated_sentence_words = 12   # W-63: a sentence of this many words or more appears once in a book
+repeated_opening_words = 10    # W-64: a sentence's first words, the same in this many chapters or more, are a template
+repeated_opening_chapters = 3
+repeated_openings_allowed = ["By the end of this chapter"]   # W-2's promise: every chapter opens with it, by design
+
 [recordings]                   # W-48: every recorded output folder carries a manifest with these keys
 manifest = ["script", "model", "model_version", "prompt_sha256", "created", "outputs"]
 

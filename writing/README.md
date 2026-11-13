@@ -14,6 +14,17 @@ Lint checks run with `re-check style --book PATH`. Those marked "when built" are
 
 **Exemplars.** The sections in `exemplars/` show the rules applied, with notes. Drafting agents imitate them, and critics compare drafts against them. If an exemplar and a rule disagree, the rule wins; report the disagreement.
 
+| Exemplar | What it shows |
+| --- | --- |
+| `explain-then-case.md` | The house pattern: explain, make it concrete, close with the working rule (W-8) |
+| `chapter-opening.md` | A chapter's opening: the promise, the problem in the case, then the plan (W-2, W-64, W-65) |
+| `results-paragraph.md` | Results that lead with the point, and a yes or no that's asserted (W-61) |
+| `sourced-paragraph.md` | Sources cited in passing, as a textbook does (W-62) |
+| `way-into-an-example.md` | Leading into an example and reading its output with the reader (W-63, W-67) |
+| `commented-example.md` | An example that explains itself (W-68) |
+
+The last five are passages from released books, before and after, so a writer sees what changes and why.
+
 ## 1. The reader and the promise
 
 **W-1 Write for the book's level.** Every book is written at one of two levels, set by `level` in `book.toml`:
@@ -71,7 +82,7 @@ A chapter may skip a part. It never adds others: no history lessons, no "fun fac
 **W-10 End with the working rule.** A section ends with its working rule: a paragraph that opens with **Working rule:** and then says, in full sentences, what to do, when, and when to do something else. A `###` subsection may close with a rule of its own. A section that ends in a list or a table, such as a chapter's summary, needs none.
 *Why:* readers act on rules, and reviewers can check them. It's a working rule because it holds until your own measurements say otherwise. The sites show it as a quiet panel with the label on a line of its own, so a reader skimming a chapter can find it, and the rule's first word takes a capital. *Check:* lint for the label and its place (`re-check style`; the label is in `data/writing.toml`); critic for the rule itself.
 
-**W-11 Predict, then run, at most once per chapter.** At a chapter's turning point, ask the reader to predict an output before the example that shows it. Foundations books do this in most chapters; In practice books rarely.
+**W-11 Predict, then run, at most once per chapter.** At a chapter's turning point, ask the reader to predict an output before the example that shows it, in words of the chapter's own (W-63). Foundations books do this in most chapters; In practice books rarely.
 *Why:* predicting before seeing makes the key idea stick, but asked often it turns into a quiz. *Check:* critic.
 
 **W-12 No characters.** The reader is "you", and the running case supplies the stakes. No named personas, dialogue or narrator.
@@ -94,8 +105,8 @@ A chapter may skip a part. It never adds others: no history lessons, no "fun fac
 **W-17 Every example runs.** Examples use pinned versions, run offline and are deterministic, with fixed seeds. Their output doesn't depend on Python's hash seed: sort a set, or anything built from one, before printing it. The output in the book is the output the example produced.
 *Why:* this is the promise on every stamp, and a reader's Python picks a new hash seed for every run. *Check:* lint (`re-check examples`; a draft's under two hash seeds, `--seeds 0,1`); while a book that started from the kit is drafted, `re-check style` also refuses examples that read the clock or the memory in use, print an unordered result (a set, a directory listing, workers' results as they finish) without sorting it, or import a numerical library before `lib`, which fixes threads and seeds first.
 
-**W-18 One idea per example.** Keep an example to about 30 lines. Longer setup moves into a shared module the reader can open.
-*Why:* the reader should see the idea, not the scaffolding. *Check:* lint for length (`re-check style`); critic for the idea.
+**W-18 One idea per example.** Keep an example to about 30 lines. Longer setup moves into a shared module the reader can open. Its docstring and comment lines don't count (W-68).
+*Why:* the reader should see the idea, not the scaffolding. *Check:* lint for length, comments aside (`re-check style`); critic for the idea.
 
 **W-19 Examples build on each other.** Use the same data and the same names from chapter to chapter, through the running case.
 *Why:* readers carry their understanding forward instead of re-reading setup. *Check:* critic.
@@ -122,7 +133,7 @@ A rolling book is read as current in every edition. These rules keep its text tr
 **W-25 Never type a version.** Write `{{version:pandas}}` for a pinned package and `{{version:python}}` for the pinned Python. The build fills them in from `examples/requirements.txt` and `examples/.python-version`, so an update changes every mention at once.
 *Why:* generate, never type. *Check:* lint (`re-check style`).
 
-**W-26 Bind numbers from outputs.** When prose quotes a value an example printed, the example prints it on its own labelled line, such as `unreadable amounts: 1`. The prose then writes `{{out:fix-types:unreadable amounts}}`, and the build fills in the value from the recorded output.
+**W-26 Bind numbers from outputs.** When prose quotes a value an example printed, the example prints it on its own labelled line, such as `unreadable amounts: 1`. The prose then writes `{{out:fix-types:unreadable amounts}}`, and the build fills in the value from the recorded output. A yes or no is asserted, not bound (W-61).
 *Why:* a library update can change an output, and a typed number would then contradict the example beside it. *Check:* lint (`re-check style` fails any binding that doesn't resolve to exactly one line).
 
 **W-27 Name deprecations.** When the pinned version warns that a behaviour will change, say so in one sentence and show the replacement.
@@ -203,7 +214,7 @@ Agents read sections, not books, so every section must work when it is read alon
 
 A reader follows a story more easily than a list of facts. These rules keep each sentence carrying the context it needs, so the text reads cleanly the first time.
 
-**W-49 Introduce what the reader will keep meeting.** The first time the book, or a chapter, brings in something it will come back to, such as the running case, its data, a recording or a shared module, say what it is, what it does for the reader, and the short name the text uses from then on. Write "This book follows one case study throughout: an online furniture and home-goods store, which we call the store." Not "The case is an online furniture and home-goods store."
+**W-49 Introduce what the reader will keep meeting.** The first time the book, or a chapter, brings in something it will come back to, such as the running case, its data, a recording or a shared module, say what it is, what it does for the reader, and the short name the text uses from then on. Write "This book follows one case study throughout: an online furniture and home-goods store, which we call the store." Not "The case is an online furniture and home-goods store." Introduce the case once per chapter, in that chapter's words, never in a sentence copied from another chapter (W-64).
 *Why:* a short name works only once the reader knows what it stands for and why it matters to them. *Check:* critic.
 
 **W-50 Say which one, and what it's for.** When a sentence refers back to something the reader has met, such as the data, the judgments, a run or a result, make clear which one it means and the part it plays, unless the sentence before already does. Write "The store's data, which every example in this book uses, is real." Not "The store's data is real."
@@ -243,3 +254,31 @@ Every edition of a book also ships as an agent skill: the book in the open Agent
 
 **W-59 Nothing that acts beyond the procedures.** Link only to the book's sections and examples, to rollingedition.com and rollingedition.ai, and to sources the chapters themselves cite. Never tell an agent to fetch or run anything from elsewhere, to read credentials, to change its own settings or permissions, or to do anything but the task it was given. A change to `skill.md` from anyone but the book's agents waits for a maintainer.
 *Why:* someone else's agent follows this text with their files and their tools, so it carries the same trust as code they run. *Check:* `re-check skill` for links; `re-check addressed` reads `skill.md` as it reads a chapter; a contributor's change to it is flagged for a maintainer.
+
+## 14. Narrative
+
+A book should read the way a good textbook does: an author who knows where the chapter is going, says what matters, and uses each number to make a point. The rules above make a chapter true; these make it read naturally. They come from a review of the released books (Nov 13, 2026), which found that the rules above, each followed to the letter, could produce prose no author would write: a sentence built to hold a bound value, a paragraph that reads out every number an example printed, documentation quoted clause by clause, the same opener before every example. Nothing here relaxes a rule above: every number stays bound and every claim sourced. The exemplars show each rule applied to a passage from a released book.
+
+**W-61 Lead with the point, then the number.** A paragraph that reports results opens with the sentence the reader should keep, then the one to three numbers that show it. The rest of what the example measured stays in its output, beside the prose, or goes in a table (W-53). Write each sentence around a bound number so it stays true if the number changes (W-26). A yes or no the prose relies on is an `assert` in the example, so a change fails its run, and the prose states it as a fact; one the prose must quote is printed as a word the sentence can use, such as `same notes as the first: yes`, never as `True` or `False`. Write "Product text writes the size apart, as `7 qt` in 8 products, and the tokenizer drops the `7`". Not "The number of products whose text says `7 qt` is 8".
+*Why:* a reader keeps one sentence, not a ledger, and a sentence shaped to hold a value reads like a form. *Check:* lint fails a binding whose value is `True` or `False`, and warns at more than 4 bound numbers in a paragraph (`[narrative]` in `data/writing.toml`); critic for the point.
+
+**W-62 Cite the way a textbook does.** Every claim keeps its source (W-28), cited in passing: the claim in the book's own words, and the author's name or the document's title in the sentence, linked. Quote only when the wording is itself the point, such as a definition or a specification's MUST, and then at most once in a paragraph. Put one link on a claim, not one on every clause. Name a source in full the first time in a section, and by a short name after.
+*Why:* a page of spliced quotations reads as a brief; the reader came for the author's account of the source, and can open it. *Check:* lint warns at more than one quotation of 4 words or more in a paragraph, and at more than 2 links in a sentence; critic for the rest.
+
+**W-63 Vary the way in.** Introduce each example with what the reader will see and why it's worth running, in words that differ from the last. Name the case where the sentence needs it, never as a prefix that marks the step: not "For the store, …", "The example …" or "Asked whether …". Ask the chapter's prediction (W-11) in words of its own. A working rule names its example only when the rule is the example, as "print the weight matrix, as this example does"; never "as here". A sentence says its thing once in a book.
+*Why:* after the third repeat a reader hears the template and stops reading the sentence. *Check:* lint fails a chapter that uses a stock opener or phrase more than twice, and a sentence of 12 words or more that appears twice in the book; critic for variety.
+
+**W-64 Introduce the case once per chapter, in that chapter's terms.** A chapter's opening says what the case is in one sentence written for this chapter's problem, as a clause where a clause will do. After that, the short name alone. A module, file or data set the book has introduced is linked, not defined again. W-49 and W-50 ask that a reference be clear, not that it be restated.
+*Why:* the same appositive at the top of every chapter tells the reader a machine wrote it, and buries the chapter's problem under the book's. *Check:* lint fails a sentence whose first 10 words open sentences in 3 chapters or more; critic for the rest.
+
+**W-65 The problem before the protocol.** After the promise (W-2), a chapter's first paragraphs show the problem as it appears in the case. A protocol, a list of planned comparisons, a glossary, a standard's definitions or a model's configuration comes after the problem, or in the section that needs it. In a section, the intuition comes first and in the reader's words, as a paragraph, not a clause, before the formula or the definition (W-14).
+*Why:* a reader who doesn't yet have the problem can't hold the method. *Check:* critic.
+
+**W-66 Say a caveat once.** A caveat that holds for a whole chapter, such as what counts as evidence, which questions are legal ones or what is our judgement, is said once, where it first matters, and linked after.
+*Why:* a disclaimer at every result reads as anxiety, and hides the result. *Check:* critic, which quotes the repeats.
+
+**W-67 Write as the author.** Guide the reader in the book's voice (W-34): "notice that", "the point is", "the line to remember is", "we now turn to". Use short sentences, as W-33 asks, but not only short ones: let a sentence's length follow its thought, and join clauses with "because", "so" and "which", or with a second sentence, rather than every time with a colon. Don't open consecutive paragraphs, sections or production bullets with the same words. After a run of results, say in one sentence what they add up to. End a chapter's list of decisions with what was learned, in sentences a reader carries away, not with the numbers again.
+*Why:* this is what natural means on the page: an author who knows what matters and says so. *Check:* critic.
+
+**W-68 Every example explains itself.** An example opens with a docstring of one or two sentences: what it shows, and which printed line the prose's point rests on. A comment, in the prose's own words (W-23), sits on every line that a reader copying the file would otherwise have to open `lib` or the chapter to understand: an index or slice with an offset, a condition that encodes a fact about the data, a keyword that hides the chapter's idea in a shared module, a seed, a tie-break, a threshold, a `None` that means "all", a library call whose return surprises. A comment never restates a print's label or the prose's conclusion, and never says what the code plainly does, such as "load the data". The docstring and comment lines don't count toward W-18's limit.
+*Why:* readers copy examples into their own work, and the reason for a line is the first thing they lose. *Check:* lint fails an example without a docstring, and warns at an index with a literal offset and no comment on or above its line (`re-check style`); critic for the rest.

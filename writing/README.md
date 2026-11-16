@@ -156,6 +156,24 @@ A rolling book is read as current in every edition. These rules keep its text tr
 **W-32 Original text.** No passage may closely follow a published source. When wording matters, quote briefly and attribute it.
 *Why:* copyright, and trust. *Check:* lint (when built: similarity check before every stamp).
 
+**W-69 Research changes a book only as far as its evidence goes.** A paper is a hypothesis until the book can show it. What a result may change depends on how settled it is:
+- A single preprint without code changes nothing.
+- A single paper with code may be mentioned in passing, as recent and preliminary ("a 2026 preprint reports…"), or added as a caution. It changes no recommendation.
+- A result the book reproduces on its own case, with an example, may become a measured claim. The number is the book's own; the paper is cited as where the idea came from.
+- A recommendation (W-13) changes only when a result has been reproduced by others, or peer-reviewed and supported by maintained libraries, and the book reproduces it on its own case. Reversing a recommendation needs more evidence than adding a caution.
+
+When studies disagree, give both with their setups, and make the recommendation depend on what separates them, measured on the book's case where possible (W-31).
+
+Weigh a study by its evidence, not its authors:
+- whether others have reproduced it;
+- whether its code and data are open;
+- online experiments over offline metrics;
+- a scale and setting close to the reader's;
+- any stake the authors have in the result.
+
+Label a preprint as one, and say when a study's authors make the product it measures. Never copy a number from a paper into the book's results: results are the book's own runs.
+*Why:* readers trust a book to say what's established. A single preprint can be wrong, and results often don't carry over between scales and settings. *Check:* critic, and the researcher's labels for how settled each source is.
+
 ## 7. Style
 
 **W-33 Voice.** Precise, generous and plain, like a senior engineer explaining something to a capable colleague. Use short sentences, exact numbers and no hype.

@@ -25,3 +25,4 @@ content = ["prose", "code"]
 "W-66" = { since = "2026-11-13", what = "say a caveat once" }
 "W-67" = { since = "2026-11-13", what = "write as the author" }
 "W-68" = { since = "2026-11-13", what = "every example explains itself: a docstring, and comments on the why" }
+"W-69" = { since = "2026-11-16", what = "research changes a book only as far as its evidence goes" }

@@ -115,7 +115,7 @@ def test_a_fresh_runtime_is_built_in_a_new_folder_and_removed_after(tmp_path, mo
         examples.backend_named("container", fresh=True)
 
 
-def test_a_fresh_runtime_with_models_copies_the_kept_ones_files_and_checks_them(tmp_path, monkeypatch):
+def test_a_fresh_runtime_with_models_copies_the_kept_files_and_checks_them(tmp_path, monkeypatch):
     monkeypatch.setenv("RE_EXAMPLES_ENV_DIR", str(tmp_path / "envs"))
     monkeypatch.setattr(examples.subprocess, "run", fake_uv)
     rt = examples.Runtime("3.12.15", "six==1.16.0\n", models="x")
@@ -123,10 +123,12 @@ def test_a_fresh_runtime_with_models_copies_the_kept_ones_files_and_checks_them(
     fetched = []
     monkeypatch.setattr(examples.model_files, "fetch", lambda models, cache: fetched.append(Path(cache)) or 0)
     monkeypatch.setattr(examples.model_files, "digest", lambda models: hashlib.sha256(b"").hexdigest())
-    kept = examples.VenvBackend(block_network=False)
-    (kept.models_dir(rt) / "hub").mkdir(parents=True)
-    (kept.models_dir(rt) / "hub" / "weights").write_text("w")
+    shared = examples.VenvBackend.shared_models_dir(rt)          # kept once, outside any runtime's folder
+    assert shared == tmp_path / "envs" / "models" / hashlib.sha256(b"").hexdigest()[:16]
+    (shared / "hub").mkdir(parents=True)
+    (shared / "hub" / "weights").write_text("w")
     fresh = examples.VenvBackend(block_network=False, fresh=True)
     fresh.prepare(rt)
-    assert (fresh.models_dir(rt) / "hub" / "weights").read_text() == "w" and fetched == [fresh.models_dir(rt)]
+    assert (fresh.models_dir(rt) / "hub" / "weights").read_text() == "w" and fetched == [shared, fresh.models_dir(rt)]
     fresh.cleanup()
+    assert (shared / "hub" / "weights").exists()                  # a fresh runtime's cleanup leaves the kept files

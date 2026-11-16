@@ -197,33 +197,67 @@ def test_the_venv_fetches_the_models_beside_itself_and_its_examples_read_them_of
     monkeypatch.setattr(examples.model_files, "fetch", lambda ms, cache: fetched.append((ms, cache)) or 0)
     backend = examples.VenvBackend(block_network=False)
     backend.prepare(rt)
-    assert fetched == [(rt.model_list(), backend.env_dir(rt) / "hf")] and backend.ready(rt)
+    shared = tmp_path / "envs" / "models" / models.digest(rt.model_list())[:16]      # kept once, whatever the pins
+    assert fetched == [(rt.model_list(), shared), (rt.model_list(), backend.env_dir(rt) / "hf")] and backend.ready(rt)
     _, env = backend.command(rt, tmp_path, "load.py")
     assert env["HF_HOME"] == str(backend.env_dir(rt) / "hf") and env["HF_HUB_OFFLINE"] == "1"
     _, plain_env = backend.command(examples.Runtime("3.12.15", ""), tmp_path, "load.py")
     assert "HF_HOME" not in plain_env
 
 
-def test_the_container_puts_the_models_in_a_layer_on_the_pins_image(tmp_path, monkeypatch):
+def test_the_container_puts_the_models_own_image_on_the_pins_image(tmp_path, monkeypatch):
     rt = examples.read_runtime(book_root(tmp_path, entry()))
     calls, contexts = [], []
 
     def run(cmd, **k):
         calls.append(cmd)
-        if cmd[1] == "build" and "models.Dockerfile" in " ".join(cmd):
+        if cmd[1] == "build":
             contexts.append(sorted(p.name for p in Path(cmd[-1]).iterdir()))
-            assert json.loads((Path(cmd[-1]) / "models.json").read_text())[0]["revision"] == COMMIT
+            if cmd[cmd.index("-f") + 1].endswith("/models.Dockerfile"):
+                assert json.loads((Path(cmd[-1]) / "models.json").read_text())[0]["revision"] == COMMIT
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     monkeypatch.setattr(examples.subprocess, "run", run)
     backend = examples.ContainerBackend(registry="")
     backend.prepare(rt)
-    base, layer = calls
-    assert base[base.index("-t") + 1] == backend.base_image(rt)
-    assert layer[layer.index("-t") + 1] == backend.image(rt) and f"BASE={backend.base_image(rt)}" in layer
-    assert contexts == [["fetch_models.py", "models.json"]]
+    pins, fetch, together = calls                       # no registry: nothing pulled or pushed
+    assert pins[pins.index("-t") + 1] == backend.base_image(rt)
+    # the models' own image, fetched on the pinned Python image, and named by the models alone
+    assert fetch[fetch.index("-t") + 1] == backend.models_image(rt) == backend.models_tag(rt)
+    assert f"BASE={examples.base_for('3.12.15')['image']}" in fetch and "SOURCE_DATE_EPOCH=0" in fetch
+    assert together[together.index("-f") + 1] == str(examples.WITH_MODELS_DOCKERFILE)
+    assert together[together.index("-t") + 1] == backend.image(rt)
+    assert f"PINS={backend.base_image(rt)}" in together and f"MODELS={backend.models_image(rt)}" in together
+    assert "SOURCE_DATE_EPOCH=0" in together
+    assert contexts == [["requirements.txt"], ["fetch_models.py", "models.json"], []]
     cmd, _ = backend.command(rt, tmp_path, "load.py")
     assert "HF_HUB_OFFLINE=1" in cmd and f"HF_HOME={models.settings()['image_cache']}" in cmd
+
+
+def test_new_pins_reuse_the_models_image_a_registry_holds(tmp_path, monkeypatch):
+    """The models' image is named by the models and its own definition, never the pins: a pin bump pulls it, and only
+    the runtime's image, whose models' layer is the same blob, is built and pushed."""
+    old = examples.read_runtime(book_root(tmp_path / "a", entry()))
+    new = examples.read_runtime(book_root(tmp_path / "b", entry(), requirements="transformers==5.23.0\n"))
+    backend = examples.ContainerBackend(registry="r.example/p/runtime")
+    assert new.key != old.key and backend.models_tag(new) == backend.models_tag(old)
+    assert backend.models_tag(new).startswith(f"re-models:{models.digest(new.model_list())[:16]}-")
+    assert backend.models_image(new) == f"r.example/p/runtime/{backend.models_tag(new)}"
+    calls = []
+
+    def run(cmd, **k):
+        calls.append(cmd)
+        held = cmd[1] == "pull" and cmd[-1] == backend.models_image(new)     # the models' image, from the old pins
+        return subprocess.CompletedProcess(cmd, 0 if held or cmd[1] in ("build", "push") else 1, "", "")
+
+    monkeypatch.setattr(examples.subprocess, "run", run)
+    backend.prepare(new)
+    steps = [(c[1], c[c.index("-f") + 1].rsplit("/", 1)[-1] if c[1] == "build" else c[-1]) for c in calls]
+    assert steps == [("pull", backend.image(new)), ("build", "Dockerfile"), ("pull", backend.models_image(new)),
+                     ("build", "with-models.Dockerfile"), ("push", backend.image(new))]
+    # each definition is in the runtime's tag, and the models' image's only its own
+    assert examples.models_image_key("3.12.15") != examples.models_dockerfile_key("3.12.15")
+    assert backend.models_tag(new).endswith("-" + examples.models_image_key("3.12.15"))
 
 
 def test_the_readme_names_the_models_and_how_to_install_beside_pytorchs_index(tmp_path):

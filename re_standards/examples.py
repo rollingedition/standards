@@ -51,6 +51,7 @@ from .bookfmt import Book
 HARNESS = Path(__file__).with_name("harness.py")
 DOCKERFILE = Path(__file__).resolve().parent.parent / "runtime" / "Dockerfile"
 MODELS_DOCKERFILE = DOCKERFILE.with_name("models.Dockerfile")
+WITH_MODELS_DOCKERFILE = DOCKERFILE.with_name("with-models.Dockerfile")
 FETCH_MODELS = Path(__file__).with_name("fetch_models.py")
 PIN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s;#]+)")
 INDEX = re.compile(r"^--extra-index-url\s+(\S+)$")     # an index beside PyPI, from [runtime] extra_indexes only
@@ -342,10 +343,13 @@ class VenvBackend(Backend):
                 raise ExamplesError(f"could not build the pinned runtime: {r.stderr.strip()[-2000:]}")
         self.compile_stdlib(python)
         if runtime.models:
-            shared = env_root() / target.name / "hf"
-            if self.fresh and shared.is_dir():          # the same pinned files, copied rather than downloaded again;
-                shutil.copytree(shared, self.models_dir(runtime), dirs_exist_ok=True)   # every hash is checked below
+            # fetched once into a folder of their own, named by the models alone, so new pins or a fresh runtime copy
+            # them rather than download them again; the copy's every hash is checked, and a file that differs is fetched
+            shared = self.shared_models_dir(runtime)
             try:
+                model_files.fetch(runtime.model_list(), shared)
+                if shared.is_dir():
+                    shutil.copytree(shared, self.models_dir(runtime), dirs_exist_ok=True)
                 model_files.fetch(runtime.model_list(), self.models_dir(runtime))
             except (OSError, ValueError) as e:
                 raise ExamplesError(f"could not fetch the pinned model files: {e}") from None
@@ -361,6 +365,11 @@ class VenvBackend(Backend):
     def models_dir(self, runtime: Runtime) -> Path:
         """The runtime's Hugging Face cache, beside its venv: where its examples find their models offline."""
         return self.env_dir(runtime) / "hf"
+
+    @staticmethod
+    def shared_models_dir(runtime: Runtime) -> Path:
+        """The models' files kept once on this machine, for every runtime that loads them, fresh ones too."""
+        return env_root() / "models" / model_files.digest(runtime.model_list())[:16]
 
     def command(self, runtime: Runtime, workdir: Path, example: str, seed: int | None = None) -> tuple[list[str], dict]:
         python = self.env_dir(runtime) / "bin" / "python"
@@ -410,11 +419,27 @@ def dockerfile_key(python: str) -> str:
 
 
 def models_dockerfile_key(python: str) -> str:
-    """For a runtime with models: the hash of both image definitions, the base and the fetch, which build its image."""
+    """For a runtime with models: the hash of every image definition that builds its image: the base, the pins', the
+    models' own image and the one that puts them together."""
     h = hashlib.sha256(_base_key(python) + b"\0")
-    for path in (DOCKERFILE, MODELS_DOCKERFILE, FETCH_MODELS):
+    for path in (DOCKERFILE, MODELS_DOCKERFILE, FETCH_MODELS, WITH_MODELS_DOCKERFILE):
         h.update(path.read_bytes() + b"\0")
     return h.hexdigest()[:8]
+
+
+def models_image_key(python: str) -> str:
+    """The models' own image's definition: the base it fetches on and the fetch. Never the pins, so a book's new pins
+    find the models' image already built."""
+    h = hashlib.sha256(_base_key(python) + b"\0")
+    for path in (MODELS_DOCKERFILE, FETCH_MODELS):
+        h.update(path.read_bytes() + b"\0")
+    return h.hexdigest()[:8]
+
+
+# Every image a runtime with models builds sets it (SOURCE_DATE_EPOCH, which BuildKit reads), so the folders a COPY
+# makes carry this time, not the build's: the models' layer is then the same blob on every pin bump, and a registry
+# keeps it once
+EPOCH = "0"
 
 
 class ContainerBackend(Backend):
@@ -433,9 +458,11 @@ class ContainerBackend(Backend):
     """
     name = "container"
 
-    def __init__(self, engine: str = "docker", repository: str = "re-examples", registry: str | None = None):
+    def __init__(self, engine: str = "docker", repository: str = "re-examples", registry: str | None = None,
+                 models_repository: str = "re-models"):
         self.engine = engine
         self.repository = repository
+        self.models_repository = models_repository
         self.registry = (os.environ.get("RE_EXAMPLES_REGISTRY", "") if registry is None else registry).strip().rstrip("/")
 
     def tag(self, runtime: Runtime) -> str:
@@ -448,9 +475,6 @@ class ContainerBackend(Backend):
         """The image as the engine names it: pulled from, pushed to and run from the registry when there is one."""
         return f"{self.registry}/{self.tag(runtime)}" if self.registry else self.tag(runtime)
 
-    def pull_command(self, runtime: Runtime) -> list[str]:
-        return [self.engine, "pull", "--quiet", self.image(runtime)]
-
     def build_command(self, runtime: Runtime, context: Path) -> list[str]:
         """The pins' image. For a runtime with models, the base that models_build_command's layer goes on."""
         target = self.base_image(runtime) if runtime.models else self.image(runtime)
@@ -462,16 +486,42 @@ class ContainerBackend(Backend):
         """A local name for the pins' image under a runtime with models: built, never pushed."""
         return f"{self.repository}-base:py{runtime.python}-{runtime.key}-{dockerfile_key(runtime.python)}"
 
-    def models_build_command(self, runtime: Runtime, context: Path) -> list[str]:
-        return [self.engine, "build", "--quiet", "-f", str(MODELS_DOCKERFILE), "--build-arg", f"BASE={self.base_image(runtime)}",
-                "--build-arg", f"BASE_URL={model_files.settings()['base_url']}",
-                "--build-arg", f"CACHE={model_files.settings()['image_cache']}", "-t", self.image(runtime), str(context)]
+    def models_tag(self, runtime: Runtime) -> str:
+        """The models' own image (models.Dockerfile), without a registry: named by the models and its definition alone,
+        so every runtime with the same models, whatever its pins, shares it."""
+        return (f"{self.models_repository}:{model_files.digest(runtime.model_list())[:16]}-"
+                f"{models_image_key(runtime.python)}")
 
-    def push_command(self, runtime: Runtime) -> list[str]:
-        return [self.engine, "push", "--quiet", self.image(runtime)]
+    def models_image(self, runtime: Runtime) -> str:
+        return f"{self.registry}/{self.models_tag(runtime)}" if self.registry else self.models_tag(runtime)
+
+    def models_build_command(self, runtime: Runtime, context: Path) -> list[str]:
+        """The models' own image: fetched on the pinned Python image, then on their own (FROM scratch)."""
+        return [self.engine, "build", "--quiet", "-f", str(MODELS_DOCKERFILE),
+                "--build-arg", f"BASE={base_for(runtime.python)['image']}",
+                "--build-arg", f"BASE_URL={model_files.settings()['base_url']}",
+                "--build-arg", f"CACHE={model_files.settings()['image_cache']}",
+                "--build-arg", f"SOURCE_DATE_EPOCH={EPOCH}", "-t", self.models_image(runtime), str(context)]
+
+    def with_models_build_command(self, runtime: Runtime, context: Path) -> list[str]:
+        """The runtime's image: the pins' image with the models' layer copied on (with-models.Dockerfile)."""
+        return [self.engine, "build", "--quiet", "-f", str(WITH_MODELS_DOCKERFILE),
+                "--build-arg", f"PINS={self.base_image(runtime)}", "--build-arg", f"MODELS={self.models_image(runtime)}",
+                "--build-arg", f"CACHE={model_files.settings()['image_cache']}",
+                "--build-arg", f"SOURCE_DATE_EPOCH={EPOCH}", "-t", self.image(runtime), str(context)]
+
+    def _pulled(self, image: str) -> bool:
+        return subprocess.run([self.engine, "pull", "--quiet", image], capture_output=True, text=True).returncode == 0
+
+    def _push(self, image: str) -> None:
+        """A failed push only costs the next run a build, so it warns rather than failing the examples."""
+        r = subprocess.run([self.engine, "push", "--quiet", image], capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"warning: could not push {image}, so the next run builds it again: {r.stderr.strip()[-500:]}",
+                  file=sys.stderr)
 
     def prepare(self, runtime: Runtime, context: Path | None = None) -> None:
-        if self.registry and subprocess.run(self.pull_command(runtime), capture_output=True, text=True).returncode == 0:
+        if self.registry and self._pulled(self.image(runtime)):
             return                                  # an earlier run built it
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "requirements.txt").write_text(runtime.requirements)
@@ -479,17 +529,22 @@ class ContainerBackend(Backend):
             if r.returncode != 0:
                 raise ExamplesError(f"could not build the example image: {build_failure(r.stderr)}")
         if runtime.models:
-            with tempfile.TemporaryDirectory() as tmp:
-                (Path(tmp) / "models.json").write_text(json.dumps([m.as_json() for m in runtime.model_list()]))
-                shutil.copy(FETCH_MODELS, Path(tmp) / "fetch_models.py")
-                r = subprocess.run(self.models_build_command(runtime, Path(tmp)), capture_output=True, text=True)
+            # the models' own image, built once for every runtime that loads them: pulled when a registry has it
+            if not (self.registry and self._pulled(self.models_image(runtime))):
+                with tempfile.TemporaryDirectory() as tmp:
+                    (Path(tmp) / "models.json").write_text(json.dumps([m.as_json() for m in runtime.model_list()]))
+                    shutil.copy(FETCH_MODELS, Path(tmp) / "fetch_models.py")
+                    r = subprocess.run(self.models_build_command(runtime, Path(tmp)), capture_output=True, text=True)
+                    if r.returncode != 0:
+                        raise ExamplesError(f"could not fetch the pinned model files: {r.stderr.strip()[-2000:]}")
+                if self.registry:
+                    self._push(self.models_image(runtime))
+            with tempfile.TemporaryDirectory() as tmp:          # nothing to send: both parts are images
+                r = subprocess.run(self.with_models_build_command(runtime, Path(tmp)), capture_output=True, text=True)
                 if r.returncode != 0:
                     raise ExamplesError(f"could not add the pinned model files to the example image: {r.stderr.strip()[-2000:]}")
         if self.registry:
-            r = subprocess.run(self.push_command(runtime), capture_output=True, text=True)
-            if r.returncode != 0:
-                print(f"warning: could not push {self.image(runtime)}, so the next run builds it again: "
-                      f"{r.stderr.strip()[-500:]}", file=sys.stderr)
+            self._push(self.image(runtime))
 
     def command(self, runtime: Runtime, workdir: Path, example: str, seed: int | None = None) -> tuple[list[str], dict]:
         extra = model_files.env(model_files.settings()["image_cache"]) if runtime.models else {}

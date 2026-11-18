@@ -80,7 +80,7 @@ notice = "Rolling Edition, its logo and the edition stamp are trademarks of {hol
 # {text} and {code} are the licences' names ([licences]); {copyright} is code_copyright, above.
 [reuse]
 short = "Text is {text}. Code is {code}. Credit Rolling Edition, link back to the book and to the licence, and say what you changed."
-full = "Book text is {text}, and free to use at work and in teaching: credit Rolling Edition, link back to the book and to the licence, and say what you changed. Code examples are {code}: keep the notice “{copyright}” and the {code} terms with any code you copy."
+full = "Book text is {text}, and free to reuse: credit Rolling Edition, link back to the book and to the licence, and say what you changed. Code examples are {code}: keep the notice “{copyright}” and the {code} terms with any code you copy."
 
 # An authored book (book.toml's [[authors]], once it's active) names its authors where a house book names Rolling Edition:
 # in its byline, the code's copyright and how it may be reused. Each author keeps their copyright, and the text and the
@@ -89,7 +89,7 @@ full = "Book text is {text}, and free to use at work and in teaching: credit Rol
 [authored]
 byline = "By {authors}, with Rolling Edition"
 code_copyright = "Copyright (c) {authors}, Rolling Edition and contributors"
-reuse = "Book text is {text}, and free to use at work and in teaching: credit {authors} and Rolling Edition, link back to the book and to the licence, and say what you changed. Code examples are {code}: keep the notice “{copyright}” and the {code} terms with any code you copy."
+reuse = "Book text is {text}, and free to reuse: credit {authors} and Rolling Edition, link back to the book and to the licence, and say what you changed. Code examples are {code}: keep the notice “{copyright}” and the {code} terms with any code you copy."
 interests = "Disclosed interests"     # the heading of each author's interests, as book.toml's `interests` gives them
 
 # A book's own check workflows (.github/workflows/, from templates/book/workflows/). A pull request runs only the

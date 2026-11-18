@@ -104,7 +104,7 @@ def test_the_front_page_asks_reusers_to_credit_and_link_back(tmp_path):
     licence = text.split("## Licence\n\n", 1)[1]
     assert licence.startswith("Text: [CC BY-NC 4.0](LICENSE), with our added permission: [Reuse our books]"
                               "(https://rollingedition.com/policies/reuse). Code examples: [MIT](LICENSE-CODE).\n")
-    assert ("Book text is CC BY-NC 4.0, and free to use at work and in teaching: credit Rolling Edition, link back to the "
+    assert ("Book text is CC BY-NC 4.0, and free to reuse: credit Rolling Edition, link back to the "
             "book and to the licence, and say what you changed. Code examples are MIT: keep the notice “Copyright (c) "
             "Rolling Edition and contributors” and the MIT terms with any code you copy. We'd be glad of a link back for "
             "the code, too.") in licence
@@ -222,7 +222,7 @@ def test_an_authored_books_front_page_names_its_authors(tmp_path):
     assert "**Written with AI. Verified by people.**" in text and "with AI ·" not in text
     assert "**Disclosed interests:** Jane Doe: Maintains a library this book teaches.\n" in text
     assert "A change to what the book says or what an example does also waits for one of its authors to approve it." in text
-    assert ("Book text is CC BY-NC 4.0, and free to use at work and in teaching: credit Jane Doe, kestrel and Rolling "
+    assert ("Book text is CC BY-NC 4.0, and free to reuse: credit Jane Doe, kestrel and Rolling "
             "Edition, link back to the book and to the licence, and say what you changed. Code examples are MIT: keep the "
             "notice “Copyright (c) Jane Doe, kestrel, Rolling Edition and contributors”") in text
     assert "Copyright (c) Jane Doe, kestrel, Rolling Edition and contributors" in files["LICENSE-CODE"]

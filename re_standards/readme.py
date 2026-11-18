@@ -125,6 +125,21 @@ def reuse(cfg: dict, wording: str = "full", manifest: dict | None = None) -> str
     return cfg["reuse"][wording].format(copyright=cfg["code_copyright"], **named)
 
 
+def licence_paragraph(cfg: dict, manifest: dict | None, data: bool = False) -> str:
+    """The front page's licence, once: each licence linked, then what reusing asks, the credit for the text and the
+    notice for the code. It named the licences twice, in a line and again in the reuse wording (the founder, Nov 18,
+    2026). An authored book's credit and notice name its authors."""
+    lic = licences(cfg)
+    names = credited(manifest or {})
+    who = f"{', '.join(names)} and Rolling Edition" if names else "Rolling Edition"
+    notice = code_copyright(cfg, manifest) if names else cfg["code_copyright"]
+    code = lic["code"]["name"]
+    return (f"Text: [{lic['text']['name']}](LICENSE), with our added permission: [{lic['permission']['title']}]"
+            f"({lic['permission']['url']}). Credit {who}, link back to the book and to the licence, and say what you "
+            f"changed. Code examples: [{code}](LICENSE-CODE). Keep the notice “{notice}” and the {code} terms with any "
+            f"code you copy; we'd be glad of a link back, too." + (" Data: see each data folder's README." if data else ""))
+
+
 def byline(manifest: dict, cfg: dict) -> str:
     """A house book's names Rolling Edition, with AI; an authored book's, its authors, with Rolling Edition."""
     names = credited(manifest)
@@ -286,11 +301,7 @@ def readme(book: Book, cfg: dict | None = None) -> str:
         "",
         "## Licence",
         "",
-        f"Text: [{lic['text']['name']}](LICENSE), with our added permission: [{lic['permission']['title']}]"
-        f"({lic['permission']['url']}). Code examples: [{lic['code']['name']}](LICENSE-CODE)."
-        + (" Data: see each data folder's README." if data_cards else ""),
-        "",
-        f"{reuse(cfg, manifest=m)} We'd be glad of a link back for the code, too.",
+        licence_paragraph(cfg, m, data_cards),
         "",
         "## Trademarks",
         "",

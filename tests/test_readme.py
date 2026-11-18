@@ -102,13 +102,12 @@ def test_the_front_page_asks_reusers_to_credit_and_link_back(tmp_path):
     names it. The trademark notice follows."""
     text = readme.readme(book_at(tmp_path))
     licence = text.split("## Licence\n\n", 1)[1]
-    assert licence.startswith("Text: [CC BY-NC 4.0](LICENSE), with our added permission: [Reuse our books]"
-                              "(https://rollingedition.com/policies/reuse). Code examples: [MIT](LICENSE-CODE).\n")
-    assert ("Book text is CC BY-NC 4.0, and free to reuse: credit Rolling Edition, link back to the "
-            "book and to the licence, and say what you changed. Code examples are MIT: keep the notice “Copyright (c) "
-            "Rolling Edition and contributors” and the MIT terms with any code you copy. We'd be glad of a link back for "
-            "the code, too.") in licence
-    assert readme.reuse(readme.load_config()) in licence and "{" not in licence
+    assert licence.startswith(                      # one paragraph: the licences, once, and what reusing asks
+        "Text: [CC BY-NC 4.0](LICENSE), with our added permission: [Reuse our books]"
+        "(https://rollingedition.com/policies/reuse). Credit Rolling Edition, link back to the book and to the licence, "
+        "and say what you changed. Code examples: [MIT](LICENSE-CODE). Keep the notice “Copyright (c) Rolling Edition "
+        "and contributors” and the MIT terms with any code you copy; we'd be glad of a link back, too.\n")
+    assert licence.count("CC BY-NC 4.0") == 1 and "{" not in licence
     assert ("## Trademarks\n\nRolling Edition, its logo and the edition stamp are trademarks of Distributed LLC. The "
             "licences cover our books' words and code, not our name or marks.") in licence
 
@@ -222,9 +221,9 @@ def test_an_authored_books_front_page_names_its_authors(tmp_path):
     assert "**Written with AI. Verified by people.**" in text and "with AI ·" not in text
     assert "**Disclosed interests:** Jane Doe: Maintains a library this book teaches.\n" in text
     assert "A change to what the book says or what an example does also waits for one of its authors to approve it." in text
-    assert ("Book text is CC BY-NC 4.0, and free to reuse: credit Jane Doe, kestrel and Rolling "
-            "Edition, link back to the book and to the licence, and say what you changed. Code examples are MIT: keep the "
-            "notice “Copyright (c) Jane Doe, kestrel, Rolling Edition and contributors”") in text
+    assert ("Credit Jane Doe, kestrel and Rolling Edition, link back to the book and to the licence, and say what you "
+            "changed. Code examples: [MIT](LICENSE-CODE). Keep the notice “Copyright (c) Jane Doe, kestrel, Rolling "
+            "Edition and contributors”") in text
     assert "Copyright (c) Jane Doe, kestrel, Rolling Edition and contributors" in files["LICENSE-CODE"]
     assert files["LICENSE"].startswith("Attribution-NonCommercial 4.0 International")
     cff = yaml.safe_load(files["CITATION.cff"])

@@ -72,14 +72,14 @@ dco = "https://developercertificate.org/"
 # the platform's [policies.terms] seller, kept in step by a platform test.
 [trademark]
 holder = "Distributed LLC"
-notice = "Rolling Edition, its logo and the edition stamp are trademarks of {holder}. The licences cover our books' words and code, not our name or marks. You may say your work is based on a Rolling Edition book, but you may not use our name, logo or stamp to suggest that your work is ours, that we endorse it, or that we verified it."
+notice = "Rolling Edition, its logo and the edition stamp are trademarks of {holder}. The licences cover our books' words and code, not our name or marks. You may say your work is based on a Rolling Edition book, but you may not use our name, logo or stamp to suggest that your work is ours, we endorse it, or verified it."
 
 # How a book may be reused, as every page of rollingedition.com words it: [reuse] in the platform's config, kept in
 # step by a platform test. The text's licence asks for credit, a link to the licence and a note of changes, and our
 # permission adds use at work and in teaching; MIT asks that its copyright and permission notice stay with the code.
 # {text} and {code} are the licences' names ([licences]); {copyright} is code_copyright, above.
 [reuse]
-short = "Text is {text}, and free to use at work and in teaching. Code is {code}. Credit Rolling Edition, link back to the book and to the licence, and say what you changed."
+short = "Text is {text}. Code is {code}. Credit Rolling Edition, link back to the book and to the licence, and say what you changed."
 full = "Book text is {text}, and free to use at work and in teaching: credit Rolling Edition, link back to the book and to the licence, and say what you changed. Code examples are {code}: keep the notice “{copyright}” and the {code} terms with any code you copy."
 
 # An authored book (book.toml's [[authors]], once it's active) names its authors where a house book names Rolling Edition:

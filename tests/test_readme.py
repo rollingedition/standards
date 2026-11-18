@@ -82,7 +82,7 @@ def test_citation_cites_the_book_without_an_edition(tmp_path):
     cff = yaml.safe_load(readme.citation(book_at(tmp_path)))
     assert cff["cff-version"] == "1.2.0" and cff["title"] == "Tiny Book"
     assert cff["authors"] == [{"name": "Rolling Edition"}] and "version" not in cff
-    assert cff["preferred-citation"]["type"] == "book" and cff["license"] == ["CC-BY-4.0", "MIT"]
+    assert cff["preferred-citation"]["type"] == "book" and cff["license"] == ["CC-BY-NC-4.0", "MIT"]
 
 
 def test_check_finds_stale_files_and_write_fixes_them(tmp_path):
@@ -93,18 +93,40 @@ def test_check_finds_stale_files_and_write_fixes_them(tmp_path):
     (book.root / "README.md").write_text("edited by hand\n")
     assert readme.check(book) == ["README.md is out of date; run re-check readme --write"]
     assert "Copyright (c) Rolling Edition and contributors" in (book.root / "LICENSE-CODE").read_text()
-    assert (book.root / "LICENSE").read_text().startswith("Attribution 4.0 International")
+    assert (book.root / "LICENSE").read_text().startswith("Attribution-NonCommercial 4.0 International")
 
 
 def test_the_front_page_asks_reusers_to_credit_and_link_back(tmp_path):
-    """The full reuse wording, as the site words it ([reuse]): CC BY 4.0 asks for credit, a link to the licence and a note
-    of changes, and MIT for its notice, named as LICENSE-CODE names it."""
+    """The full reuse wording, as the site words it ([reuse]): the text's licence asks for credit, a link to the licence
+    and a note of changes, our added permission is linked beside it, and MIT asks for its notice, named as LICENSE-CODE
+    names it. The trademark notice follows."""
     text = readme.readme(book_at(tmp_path))
     licence = text.split("## Licence\n\n", 1)[1]
-    assert ("Book text is CC BY 4.0: credit Rolling Edition, link back to the book and to the licence, and say what you "
-            "changed. Code examples are MIT: keep the notice “Copyright (c) Rolling Edition and contributors” and the MIT "
-            "terms with any code you copy. We'd be glad of a link back for the code, too.") in licence
-    assert readme.reuse(readme.load_config()) in licence and "{copyright}" not in text
+    assert licence.startswith("Text: [CC BY-NC 4.0](LICENSE), with our added permission: [Using our books at work and in "
+                              "teaching](https://rollingedition.com/reuse). Code examples: [MIT](LICENSE-CODE).\n")
+    assert ("Book text is CC BY-NC 4.0, and free to use at work and in teaching: credit Rolling Edition, link back to the "
+            "book and to the licence, and say what you changed. Code examples are MIT: keep the notice “Copyright (c) "
+            "Rolling Edition and contributors” and the MIT terms with any code you copy. We'd be glad of a link back for "
+            "the code, too.") in licence
+    assert readme.reuse(readme.load_config()) in licence and "{" not in licence
+    assert ("## Trademarks\n\nRolling Edition, its logo and the edition stamp are trademarks of Distributed LLC. The "
+            "licences cover our books' words and code, not our name or marks.") in licence
+
+
+def test_the_licences_are_named_once():
+    """[licences] names the licences every generated file and the platform use: the text's CC BY-NC 4.0, whose legal code
+    is fetched verbatim, the code's MIT, our added permission's page, and CC BY 4.0 and MIT for contributions."""
+    lic = readme.licences()
+    assert lic["text"] == {"name": "CC BY-NC 4.0", "title": "Creative Commons Attribution-NonCommercial 4.0 International",
+                           "spdx": "CC-BY-NC-4.0", "url": "https://creativecommons.org/licenses/by-nc/4.0/",
+                           "legal_code": "licenses/CC-BY-NC-4.0.txt"}
+    assert lic["code"]["spdx"] == "MIT" and lic["permission"]["url"] == "https://rollingedition.com/reuse"
+    assert lic["contributions"]["text"] == "CC BY 4.0" and lic["contributions"]["code"] == "MIT"
+    assert readme.legal_code("text").startswith("Attribution-NonCommercial 4.0 International")
+    assert "NonCommercial means not primarily intended for or directed towards" in readme.legal_code("text")
+    assert readme.legal_code("code").startswith("MIT License")
+    fetched = (readme.TEMPLATES / "fetch.py").read_text()
+    assert f'"{lic["text"]["legal_code"]}": "{lic["text"]["url"]}legalcode.txt"' in fetched
 
 
 def test_every_book_gets_the_same_renovate_config_with_a_release_age(tmp_path):
@@ -124,7 +146,7 @@ def test_every_book_gets_the_same_renovate_config_with_a_release_age(tmp_path):
 def test_this_repository_carries_its_own_generated_licences():
     licences = readme.own_licences()
     assert licences["LICENSE"].startswith("MIT License") and "Rolling Edition and contributors" in licences["LICENSE"]
-    assert "Attribution 4.0 International" in licences["LICENSE-TEXT"]
+    assert licences["LICENSE-TEXT"].startswith("Attribution-NonCommercial 4.0 International")
     assert readme.check_own_licences() == []
 
 
@@ -182,3 +204,48 @@ def test_each_book_s_weekly_run_starts_at_a_time_drawn_from_its_slug():
         minute, hour, dom, month, weekday = t.split()
         assert 5 <= int(minute) <= 55 and 0 <= int(hour) <= 23 and (dom, month) == ("*", "*") and 0 <= int(weekday) <= 6
     assert len({t.split()[4] for t in times}) == 7 and len({t.split()[1] for t in times}) > 12
+
+
+
+def authored(tmp_path, old="", new=""):
+    """The test book with authors (bookkit's AUTHORS), with one line of their [authorship] changed."""
+    from bookkit import AUTHORS, MANIFEST
+    return bookfmt.load_book(make_book(tmp_path, manifest=MANIFEST + MANIFEST_EXTRA + AUTHORS.replace(old, new)))
+
+
+def test_an_authored_books_front_page_names_its_authors(tmp_path):
+    """By its authors, with Rolling Edition; they keep their copyright, so the code's notice and the reuse words name
+    them; their interests are disclosed, and what waits for them is said. The disclosure stays as it is."""
+    files = readme.files(authored(tmp_path))
+    text = files["README.md"]
+    assert "By Jane Doe and kestrel, with Rolling Edition · **Foundations** · [Read it free online]" in text
+    assert "**Written with AI. Verified by people.**" in text and "with AI ·" not in text
+    assert "**Disclosed interests:** Jane Doe: Maintains a library this book teaches.\n" in text
+    assert "A change to what the book says or what an example does also waits for one of its authors to approve it." in text
+    assert ("Book text is CC BY-NC 4.0, and free to use at work and in teaching: credit Jane Doe, kestrel and Rolling "
+            "Edition, link back to the book and to the licence, and say what you changed. Code examples are MIT: keep the "
+            "notice “Copyright (c) Jane Doe, kestrel, Rolling Edition and contributors”") in text
+    assert "Copyright (c) Jane Doe, kestrel, Rolling Edition and contributors" in files["LICENSE-CODE"]
+    assert files["LICENSE"].startswith("Attribution-NonCommercial 4.0 International")
+    cff = yaml.safe_load(files["CITATION.cff"])
+    people = [{"family-names": "Doe", "given-names": "Jane"}, {"alias": "kestrel"}]
+    assert cff["authors"] == people and cff["preferred-citation"]["authors"] == people
+    assert cff["preferred-citation"]["publisher"] == {"name": "Rolling Edition"}
+    assert cff["preferred-citation"]["notes"] == "Written with AI. Verified by people."
+    assert not re.search(r"\bD-\d", text)
+
+
+def test_a_book_being_adopted_keeps_rolling_editions_byline_and_a_returned_one_its_authors(tmp_path):
+    """Adopting: the author is verifying the house book, so it isn't theirs yet, but its gate holds. Returned: their
+    credit stays, and nothing waits for them."""
+    adopting = readme.readme(authored(tmp_path / "adopting", 'state = "active"', 'state = "adopting"'))
+    assert "By Rolling Edition, with AI · **Foundations**" in adopting and "Disclosed interests" not in adopting
+    assert "also waits for one of its authors" in adopting
+    returned = readme.readme(authored(tmp_path / "returned", 'state = "active"', 'state = "returned"'))
+    assert "By Jane Doe and kestrel, with Rolling Edition" in returned and "waits for one of its authors" not in returned
+
+
+def test_the_gate_level_says_what_waits(tmp_path):
+    text = readme.readme(authored(tmp_path, 'gate = "meaning"', 'gate = "all"'))
+    assert ("Every change also waits for one of its authors, narration and the instructions for coding agents included; a "
+            "new major version of a library waits 72 hours for them, then merges.") in text

@@ -13,6 +13,30 @@ expert_reviewer = "demo-reviewer"
 sponsor = ""
 '''
 
+# An authored book's [[authors]] and [authorship], added to MANIFEST: placeholder people and GitHub accounts. Jane Doe
+# leads and owns the first chapter; kestrel, a pseudonym, shares the rest.
+AUTHORS = '''
+[[authors]]
+name = "Jane Doe"
+given = "Jane"
+family = "Doe"
+github = "jane-doe-example"
+github_id = 1000001
+role = "lead"
+chapters = ["first-steps"]
+interests = "Maintains a library this book teaches."
+
+[[authors]]
+name = "kestrel"
+literal = "kestrel"
+github = "kestrel-example"
+github_id = 1000002
+
+[authorship]
+gate = "meaning"
+state = "active"
+'''
+
 CHAPTER = '''---
 chapter_id: first-steps
 ---

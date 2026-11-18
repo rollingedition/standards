@@ -73,3 +73,47 @@ authors = "contributors"       # anyone but the bot: the book's agents keep it c
 what = "Changes the book's slug, title, authors, sponsor or status in book.toml: what it's called, who it credits, who funds it and whether it's listed"
 reader = "Changes the book's name, web address, credits, sponsor or whether it's listed"
 fields = ["slug", "title", "authors", "sponsor", "status"]
+
+# Authored books: a book whose book.toml names its authors ([[authors]]) sets how much waits for them ([authorship]
+# gate). On such a book, the changes its level lists wait for one of its authors to approve them on GitHub, as well as
+# for their checks, and the bot sets the review/author status. The gate is read from book.toml on the book's main
+# branch, never from the pull request, so a pull request can't lower its own gate. A house book names no authors and
+# has no gate.
+#
+# - Who approves: the owner of a chapter the change touches, or the lead author; for anything outside an owned chapter,
+#   any of the book's authors. A change to `lead_fields` in book.toml, or to `lead_files`, is always the lead author's.
+# - An approval is the author's latest review of the pull request's current commit approving it, or a pull request
+#   the author opened from their own fork. Dismissing it, or a later request for changes, cancels it, and an author's
+#   request for changes holds the pull request until they review it again or it's dismissed.
+# - A pull request flagged as a serious risk waits for a Rolling Edition maintainer and for the author.
+# - Always automatic, at every level: a version bump that isn't a new major version, a security update from the app's
+#   own branch, and a change to the generated front page and workflows alone from the app's own branch.
+# - While a book is returned, Rolling Edition maintains it and nothing waits for its authors but a change to its
+#   authors or its gate. The app's own pull request that returns a book after its author has gone doesn't wait for
+#   them.
+# - Each level says what it holds twice, as [flags] do: `what` for contributors, `reader` for the site.
+[authors]
+label = "waiting-for-author"          # on a pull request that waits for its author; the held list shows these apart
+default = "meaning"                   # the level when [authorship] gives none
+states = ["adopting", "active", "returned"]
+roles = ["lead", "author"]
+lead_fields = ["authors", "authorship"]   # book.toml's: a change to them is the lead author's
+lead_files = ["voice.toml"]               # and so is a change to these
+major_wait_hours = 72                 # at the "all" level, how long a new major version that passes waits for an author
+
+[authors.levels.meaning]
+what = "Waits for an author: a change of meaning (tier:expert), a grouped update that changes a recorded output included"
+reader = "A change to what the book says or what an example does also waits for one of its authors to approve it"
+tiers = ["expert"]
+
+[authors.levels.standard]
+what = "Waits for an author: a change of meaning (tier:expert) or a typo fix (tier:auto)"
+reader = "Every change to the book's text or examples, typo fixes included, also waits for one of its authors to approve it"
+tiers = ["expert", "auto"]
+
+[authors.levels.all]
+what = "Waits for an author: a change of meaning or a typo fix, a change to narration or skill.md alone, and a new major version that passes, which merges once it has waited {hours} hours unless an author asks for changes"
+reader = "Every change also waits for one of its authors, narration and the instructions for coding agents included; a new major version of a library waits {hours} hours for them, then merges"
+tiers = ["expert", "auto"]
+rides_along = true                    # a change to narration or skill.md alone waits too
+major = true                          # and a new major version that passes waits major_wait_hours, then merges

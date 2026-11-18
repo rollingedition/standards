@@ -1,0 +1,153 @@
+# Command steps and checks: how a terminal book writes them (steps.py), how one runner runs and compares them
+# everywhere (commands.py), and which stacks and licences a book's Lab may use (stack.py). Every value is a plan default.
+#
+# A step is a shell file, examples/{id}.sh, embedded by a paragraph that is only a link to it, as a Python example is:
+#     [Step: apply-web](../examples/apply-web.sh)
+#     [Check: web-has-three-replicas](../examples/web-has-three-replicas.sh)
+#     [File: web-deployment](../examples/manifests/web-deployment.yaml)
+# Its first lines may be directives, `#| name: value`, which Copy and Run leave out. Its recorded output is
+# examples/{id}.out, in the same ID namespace as everything else in the book.
+
+[format]
+directive_prefix = "#|"
+# The link text's label, before its colon. A Python example's link text is free; a step's, a check's and a file's
+# say which they are, so a link to a data file in a Python book is never taken for one.
+labels = { step = "Step", check = "Check", file = "File" }
+
+# Each directive, and the kind of value it takes:
+#   commands   a shell command; the directive may be repeated, and each one is polled in order
+#   masks      names from [masks], separated by commas
+#   choice     one of [compare] modes
+#   name       a word: lowercase letters, digits and hyphens
+#   flag       true or false; written alone, it's true
+#   seconds    a number of seconds, above 0 and at most [run] max_timeout_seconds
+#   exit       an exit code, 0 to 255
+#   text       one line, for a reader
+[directives]
+wait = "commands"           # polled after the step until it exits 0; never compared
+mask = "masks"              # parts of the output that differ from run to run, replaced before comparing
+compare = "choice"          # exact (after masks), lines (the expected lines, in order) or none
+tab = "name"                # run in another terminal tab, such as one for a port-forward
+background = "flag"         # don't wait for it to finish: it runs until the chapter ends
+timeout = "seconds"         # the step's limit, waits included
+check = "flag"              # the file is a check: run out of band, Passed or Not yet
+hint = "text"               # with check: what to try when it doesn't pass
+expect-exit = "exit"        # the exit code that counts as passing, when it isn't 0
+
+[defaults]
+compare = "exact"           # a step's
+check_compare = "none"      # a check's: its exit code says whether it passes
+timeout_seconds = 120
+tab = "main"
+
+[compare]
+modes = ["exact", "lines", "none"]
+# After masks, runs of spaces count as one, so a column a mask shortened doesn't move the columns after it.
+collapse_spaces = true
+
+# Named masks a step may use (`#| mask: age, pod-suffix`). Each pattern is a Python regular expression; each match is
+# replaced, in the expected output and the actual one alike, before they're compared. The recorded output keeps what
+# was printed.
+[masks.age]
+pattern = '\b\d+[smhd](?:\d+[smh])?\b'
+replace = "<age>"
+[masks.pod-suffix]
+# Kubernetes' generated names: a ReplicaSet's hash and a pod's five characters, from the alphabet Kubernetes uses
+pattern = '-(?:[bcdfghjklmnpqrstvwxz2456789]{6,10}-)?[bcdfghjklmnpqrstvwxz2456789]{5}\b'
+replace = "-<suffix>"
+[masks.ip]
+pattern = '\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b'
+replace = "<ip>"
+[masks.uid]
+pattern = '\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b'
+replace = "<uid>"
+[masks.time]
+pattern = '\b\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?\b|\b\d{2}:\d{2}:\d{2}(?:\.\d+)?\b'
+replace = "<time>"
+[masks.duration]
+pattern = '\b\d+(?:\.\d+)?(?:ns|us|µs|ms|s|m|h)\b'
+replace = "<duration>"
+[masks.resource-version]
+pattern = '''(resourceVersion["']?\s*[:=]\s*["']?)\d+'''
+replace = '\g<1><resource-version>'
+
+# Rules every step keeps, so it prints the same on every run
+[rules]
+# Waits, never sleep: a fixed pause is too short on a slow machine and wasted on a fast one. A line that runs sleep is
+# refused; `#| wait:` polls until what the step waits for is true.
+sleep = '(?:^|[;&|(]\s*|\b(?:then|do|else)\s+)sleep\s+[0-9.]'
+
+# How every runner runs a chapter: the release's, the pull request's, the Lab's host and a reader's own machine.
+[run]
+shell = ["bash", "--login"]       # a login shell, as a reader's terminal opens
+columns = 120
+rows = 40
+term = "xterm"                    # readline needs a terminal type to take a paste whole; NO_COLOR keeps colour out
+poll_seconds = 1                  # how often a wait is polled
+interrupt_seconds = 5             # how long a step has to stop after Ctrl+C at its limit, before its tab is closed
+start_seconds = 20                # how long a shell may take to show its first prompt
+max_timeout_seconds = 1800        # the longest `#| timeout:` a step may ask for
+output_max_bytes = 1000000        # a step's output; past it the rest is left out, and the step fails
+runs = 2                          # --record runs each chapter this many times, each from a fresh start, and records
+                                  # only when every run printed the same after masks
+check_before = true               # a check must not pass before its section's steps run, so it checks something
+# The only environment a step sees, with HOME, the backend's own (such as KUBECONFIG) and nothing of the caller's
+env = { PATH = "/usr/local/bin:/usr/bin:/bin", LANG = "C.UTF-8", LC_ALL = "C.UTF-8", TZ = "UTC", NO_COLOR = "1", PAGER = "cat", GIT_PAGER = "cat", SYSTEMD_PAGER = "", KUBECTL_PAGER = "" }
+
+# A book's Lab and its stack: book.toml's [lab], examples/stack.in.toml, which the author writes, and examples/stack.toml,
+# which `re-check stack --pin` generates from it, every file by URL and SHA-256 and every image by digest (stack.py).
+[stack]
+lab_kinds = ["notebook", "terminal"]      # book.toml [lab] kind: the notebook Lab, or a guided terminal
+kinds = ["k3s", "compose", "none"]        # [lab] stack: what runs beside the steps
+default_kind = "notebook"
+default_stack = "none"
+# Where each tool is fetched for: the Lab's machine and the checks run on linux-amd64; readers' own machines on any of
+# `platforms`, through the local scripts (lab/start.sh)
+lab_platform = "linux-amd64"
+platforms = ["linux-amd64", "linux-arm64", "darwin-arm64"]
+# The tools each stack needs pinned
+requires = { k3s = ["k3s", "kubectl", "k3d"], compose = [], none = [] }
+
+# Each tool a stack may pin: its licence, where it runs, and where its files and their SHA-256 come from. In a URL,
+# {version} is the version as written, {version_url} the same with + escaped, {os} and {arch} the platform's.
+# `checksums` is a sha256sum file that lists `name`; `sha256_url` a file that holds the hash first.
+[stack.tools.k3s]
+licence = "Apache-2.0"
+platforms = ["linux-amd64"]               # the Lab and the checks run k3s itself
+url = "https://github.com/k3s-io/k3s/releases/download/{version_url}/k3s"
+checksums = "https://github.com/k3s-io/k3s/releases/download/{version_url}/sha256sum-amd64.txt"
+name = "k3s"
+airgap_url = "https://github.com/k3s-io/k3s/releases/download/{version_url}/k3s-airgap-images-amd64.tar.zst"
+airgap_name = "k3s-airgap-images-amd64.tar.zst"
+image = "docker.io/rancher/k3s"           # readers' machines run k3s in this image, through k3d; its tag is the version
+                                          # with + as -
+[stack.tools.kubectl]
+licence = "Apache-2.0"
+platforms = ["linux-amd64", "linux-arm64", "darwin-arm64"]
+url = "https://dl.k8s.io/release/{version}/bin/{os}/{arch}/kubectl"
+sha256_url = "https://dl.k8s.io/release/{version}/bin/{os}/{arch}/kubectl.sha256"
+[stack.tools.helm]
+licence = "Apache-2.0"
+platforms = ["linux-amd64", "linux-arm64", "darwin-arm64"]
+url = "https://get.helm.sh/helm-{version}-{os}-{arch}.tar.gz"
+sha256_url = "https://get.helm.sh/helm-{version}-{os}-{arch}.tar.gz.sha256sum"
+[stack.tools.k3d]
+licence = "MIT"
+platforms = ["linux-amd64", "linux-arm64", "darwin-arm64"]   # readers' own machines only
+url = "https://github.com/k3d-io/k3d/releases/download/{version}/k3d-{os}-{arch}"
+checksums = "https://github.com/k3d-io/k3d/releases/download/{version}/checksums.txt"
+name = "k3d-{os}-{arch}"
+
+# Licences, as SPDX identifiers. Everything a Lab runs ships to readers' sessions, so it must be open source. Apache-2.0
+# is preferred. Refused in every Lab stack: licences that restrict offering the software as a service or that aren't
+# open source (AGPL, SSPL, the Elastic License, the Business Source License, the Redis Source Available License,
+# Commons Clause and the Confluent Community License). A licence on neither list is refused until it's read and added.
+[licences]
+preferred = "Apache-2.0"
+allowed = ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "ISC", "0BSD", "Zlib", "Unlicense", "CC0-1.0",
+           "MPL-2.0", "EPL-2.0", "PostgreSQL", "Python-2.0", "LGPL-2.1-only", "LGPL-2.1-or-later", "LGPL-3.0-only",
+           "LGPL-3.0-or-later", "GPL-2.0-only", "GPL-2.0-or-later", "GPL-3.0-only", "GPL-3.0-or-later"]
+# Regular expressions, matched against each identifier in a licence expression
+refused = ['^AGPL-', '^SSPL-', '^Elastic-', '^BUSL-', '^RSAL', 'Commons-Clause', 'Confluent-Community']
+# What to use instead, by a word in the refused image's or chart's name
+instead = { minio = "SeaweedFS", garage = "SeaweedFS", elasticsearch = "OpenSearch", kibana = "OpenSearch Dashboards", redis = "Valkey", mongo = "Postgres or FerretDB", grafana = "Prometheus, Perses and Jaeger", loki = "Prometheus, Perses and Jaeger", schema-registry = "Apicurio or Karapace", redpanda = "Apache Kafka", terraform = "OpenTofu", vault = "OpenBao", bitnami = "CloudNativePG or the project's official images" }

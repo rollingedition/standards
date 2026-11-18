@@ -1,8 +1,8 @@
 """The organization's community files, generated for its public .github repository.
 
 GitHub applies them to every repository in the organization that has none of its own: the contributing
-guide, the code of conduct (the Contributor Covenant 2.1, fetched verbatim), the security policy, issue
-forms and the pull request template. The repository's own README says what's in it, and profile/README.md
+guide, with what contributions come in under (data/readme.toml's [licences]), the code of conduct (the Contributor
+Covenant 2.1, fetched verbatim), the security policy, issue forms and the pull request template. The repository's own README says what's in it, and profile/README.md
 is the organization's page on GitHub. Conduct and security reports go to the addresses in data/community.toml.
 """
 from __future__ import annotations
@@ -29,13 +29,23 @@ def files(cfg: dict | None = None) -> tuple[dict[str, str], list[str]]:
     kinds = ", ".join(f"`{k}`" for k in KIND_LABELS)
 
     brand = readme.load_config()                          # the mission and the disclosure, as the books' READMEs have them
+    lic = readme.licences(brand)                          # what contributions come in under, and the books' licences
+    named = {"{contributions_text}": lic["contributions"]["text"], "{contributions_text_url}": lic["contributions"]["text_url"],
+             "{contributions_code}": lic["contributions"]["code"], "{contributions_code_url}": lic["contributions"]["code_url"],
+             "{dco}": lic["contributions"]["dco"], "{text}": lic["text"]["name"], "{text_url}": lic["text"]["url"],
+             "{code}": lic["code"]["name"], "{code_url}": lic["code"]["url"],
+             "{permission_link}": lic["permission"]["link"], "{permission_url}": lic["permission"]["url"],
+             "{trademark}": readme.trademark(brand)}
 
     def fill(name: str) -> str:
-        return ((COMMUNITY / name).read_text(encoding="utf-8").replace("{kinds}", kinds).replace("{standards}", cfg["standards"])
+        text = ((COMMUNITY / name).read_text(encoding="utf-8").replace("{kinds}", kinds).replace("{standards}", cfg["standards"])
                 .replace("{mission}", brand["mission"]).replace("{free}", brand["free"])
                 .replace("{disclosure}", brand["disclosure"])
                 .replace("{site}", cfg["site"]).replace("{security_contact}", cfg.get("security_contact", ""))
                 .replace("{contributing}", cfg.get("contributing", "")))
+        for key, value in named.items():
+            text = text.replace(key, value)
+        return text
     out = {
         "README.md": fill("README.md"),
         "profile/README.md": fill("profile-README.md"),

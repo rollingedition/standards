@@ -27,7 +27,8 @@ from pathlib import Path
 
 import yaml
 
-from . import data_path
+from . import authorship, data_path
+from . import stack
 from . import models as model_files
 from .bookfmt import Book
 from .catalog import LEVELS
@@ -77,17 +78,89 @@ def reader(manifest: dict, cfg: dict) -> str:
     return manifest.get("reader") or cfg["levels"].get(manifest.get("level", ""), "")
 
 
-def reuse(cfg: dict, wording: str = "full") -> str:
-    """How the book may be reused, in the short or the full wording every page of the site uses ([reuse])."""
-    return cfg["reuse"][wording].format(copyright=cfg["code_copyright"])
+def credited(manifest: dict) -> list[str]:
+    """The names an authored book credits, as book.toml gives them; none for a house book, or one still being adopted
+    (authorship.credited). Raises authorship.AuthorshipError, a ValueError, when its authors don't validate."""
+    return [a.name for a in authorship.credited(manifest)]
+
+
+def code_copyright(cfg: dict, manifest: dict | None = None) -> str:
+    """LICENSE-CODE's copyright line: Rolling Edition and contributors, and on an authored book its authors first,
+    who keep their copyright."""
+    names = credited(manifest or {})
+    return cfg["authored"]["code_copyright"].format(authors=", ".join(names)) if names else cfg["code_copyright"]
+
+
+def licences(cfg: dict | None = None) -> dict:
+    """The books' licences, our added permission and what contributions come in under ([licences]): `text` and `code`,
+    each with its name, title, SPDX ID, address and legal code's file; `permission`, with its page's address
+    ([paths] reuse); and `contributions`. The one place they're named: the platform reads them here too."""
+    cfg = cfg or load_config()
+    lic = cfg["licences"]
+    return {"text": dict(lic["text"]), "code": dict(lic["code"]),
+            "permission": {**lic["permission"], "url": _url(cfg, "reuse")},
+            "contributions": dict(lic["contributions"])}
+
+
+def legal_code(which: str, cfg: dict | None = None) -> str:
+    """A licence's full text, as its publisher wrote it (templates/fetch.py): `text` or `code`."""
+    cfg = cfg or load_config()
+    return (TEMPLATES / cfg["licences"][which]["legal_code"]).read_text(encoding="utf-8")
+
+
+def trademark(cfg: dict | None = None) -> str:
+    """The trademark notice ([trademark]): our name and marks, which no licence covers."""
+    cfg = cfg or load_config()
+    return cfg["trademark"]["notice"].format(holder=cfg["trademark"]["holder"])
+
+
+def reuse(cfg: dict, wording: str = "full", manifest: dict | None = None) -> str:
+    """How the book may be reused, in the short or the full wording every page of the site uses ([reuse]), the licences
+    named by [licences]; an authored book's names its authors ([authored] reuse)."""
+    names = credited(manifest or {})
+    lic = cfg["licences"]
+    named = {"text": lic["text"]["name"], "code": lic["code"]["name"]}
+    if names and wording == "full":
+        return cfg["authored"]["reuse"].format(authors=", ".join(names), copyright=code_copyright(cfg, manifest), **named)
+    return cfg["reuse"][wording].format(copyright=cfg["code_copyright"], **named)
 
 
 def byline(manifest: dict, cfg: dict) -> str:
-    """House books name the publisher; other books name their authors."""
-    authors = manifest.get("authors") or []
-    names = [a if isinstance(a, str) else a.get("name", "") for a in authors] or [cfg["publisher"]]
-    joined = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
-    return f"By {joined}, with AI"
+    """A house book's names Rolling Edition, with AI; an authored book's, its authors, with Rolling Edition."""
+    names = credited(manifest)
+    if names:
+        return cfg["authored"]["byline"].format(authors=authorship.names_and(names))
+    return f"By {cfg['publisher']}, with AI"
+
+
+def interests(manifest: dict) -> list[str]:
+    """Each credited author's disclosed interests, as "Jane Doe: Maintains polars."; none for a house book."""
+    return [f"{a.name}: {a.interests}" for a in authorship.credited(manifest) if a.interests]
+
+
+def gate_words(manifest: dict) -> str:
+    """On an authored book, what waits for its authors, in a reader's words (data/review-tiers.toml's [authors]); a
+    house book's front page says nothing of it. A returned book's changes don't wait for them."""
+    if authorship.state(manifest) not in ("adopting", "active"):
+        return ""
+    return authorship.level(manifest)["reader"] + "."
+
+
+def terminal_run(book: Book) -> list[str]:
+    """A terminal book's way to work through it on your own machine: its local lab (labscripts.py)."""
+    which = stack.lab(book.manifest)["stack"]
+    first = next((c.chapter_id for c in book.chapters if c.step_embeds), "CHAPTER_ID")
+    needs = (" It runs the book's Kubernetes cluster in Docker with [k3d](https://k3d.io), every tool and image pinned, "
+             "so you need Docker running." if which == "k3s" else "")
+    return ["## Work through it on your own machine", "",
+            "Every step runs in a shell, and its output must match the book's. On Linux, or macOS on Apple silicon:" +
+            needs, "",
+            "```sh",
+            "lab/start.sh                 # a workspace with the book's files" + (", and the cluster" if needs else ""),
+            f"lab/chapter.sh {first}" + " " * max(1, 13 - len(first)) + "# any chapter, from a fresh start",
+            f"lab/check.sh {first}" + " " * max(1, 15 - len(first)) + "# check your work",
+            "lab/stop.sh",
+            "```", ""]
 
 
 def readme(book: Book, cfg: dict | None = None) -> str:
@@ -105,6 +178,9 @@ def readme(book: Book, cfg: dict | None = None) -> str:
     recorded = (book.root / "examples" / "data" / "recorded").is_dir()
     preview = m.get("status") == "draft"          # a draft: private, unpublished, with no cover, edition or pages yet
     home = _url(cfg, "book", book=slug)
+    disclosed = interests(m)                      # an authored book's authors' interests; a house book has none
+    waits = gate_words(m)
+    lic = licences(cfg)
 
     rows = []
     for c in book.chapters:
@@ -126,6 +202,8 @@ def readme(book: Book, cfg: dict | None = None) -> str:
                 f"[![The latest edition's stamp]({_url(cfg, 'stamp', book=slug)})]({home}) {checks}", "",
                 m.get("summary", ""), "",
                 f"**{cfg['disclosure']}** [How we make books]({_url(cfg, 'editorial')}) · [Check a copy]({_url(cfg, 'check')})", ""]
+    if disclosed:
+        head += [f"**{cfg['authored']['interests']}:** {' '.join(disclosed)}", ""]
     out = ["<!-- Generated by re-check readme from book.toml, the chapters and the examples. Don't edit by hand. -->", ""]
     if not preview:
         out += [f'<p align="center"><a href="{home}"><img src="{_url(cfg, "cover", book=slug)}" width="220" '
@@ -144,17 +222,19 @@ def readme(book: Book, cfg: dict | None = None) -> str:
         "| --- | --- | --- | --- |",
         *rows,
         "",
-        "## Run the examples",
-        "",
-        "Every example runs offline, in a pinned environment, and its output must match the book's. With "
-        "[uv](https://docs.astral.sh/uv/):",
-        "",
-        "```sh",
-        f"uv venv --python {python.read_text().strip() if python.exists() else '3'}",
-        "uv pip install -r examples/requirements.txt" + (" --index-strategy unsafe-best-match" if indexed else ""),
-        f"cd examples && ../.venv/bin/python {first_example}.py" if first_example else "cd examples",
-        "```",
-        "",
+        *(terminal_run(book) if stack.is_terminal(m) else [
+            "## Run the examples",
+            "",
+            "Every example runs offline, in a pinned environment, and its output must match the book's. With "
+            "[uv](https://docs.astral.sh/uv/):",
+            "",
+            "```sh",
+            f"uv venv --python {python.read_text().strip() if python.exists() else '3'}",
+            "uv pip install -r examples/requirements.txt" + (" --index-strategy unsafe-best-match" if indexed else ""),
+            f"cd examples && ../.venv/bin/python {first_example}.py" if first_example else "cd examples",
+            "```",
+            "",
+        ]),
     ]
     pinned = model_files.read(book.root) if (book.root / model_files.MODELS).exists() else []
     if pinned:
@@ -183,7 +263,8 @@ def readme(book: Book, cfg: dict | None = None) -> str:
         "any fix and check every change, and a change merges once its checks pass; one with a serious risk, such as a "
         "security or copyright problem, waits for a Rolling Edition maintainer. Anyone can check the book or correct it "
         "with a pull request. Each new edition is stamped with its date, its examples passing and what changed."
-        + ("" if preview else f" [See what changed in each edition]({_url(cfg, 'changes', book=slug)})."),
+        + ("" if preview else f" [See what changed in each edition]({_url(cfg, 'changes', book=slug)}).")
+        + (f" {waits}" if waits else ""),
         "",
         "## Contribute",
         "",
@@ -205,9 +286,15 @@ def readme(book: Book, cfg: dict | None = None) -> str:
         "",
         "## Licence",
         "",
-        "Text: [CC BY 4.0](LICENSE). Code examples: [MIT](LICENSE-CODE)." + (" Data: see each data folder's README." if data_cards else ""),
+        f"Text: [{lic['text']['name']}](LICENSE), with our added permission: [{lic['permission']['title']}]"
+        f"({lic['permission']['url']}). Code examples: [{lic['code']['name']}](LICENSE-CODE)."
+        + (" Data: see each data folder's README." if data_cards else ""),
         "",
-        f"{reuse(cfg)} We'd be glad of a link back for the code, too.",
+        f"{reuse(cfg, manifest=m)} We'd be glad of a link back for the code, too.",
+        "",
+        "## Trademarks",
+        "",
+        trademark(cfg),
         "",
         "---",
         "",
@@ -222,7 +309,7 @@ def citation(book: Book, cfg: dict | None = None) -> str:
     """CITATION.cff for the book as a whole, without an edition: the site cites the edition you read."""
     cfg = cfg or load_config()
     m, slug = book.manifest, book.slug
-    authors = [{"name": a if isinstance(a, str) else a.get("name", "")} for a in (m.get("authors") or [])] or [{"name": cfg["publisher"]}]
+    authors = [cff_person(a) for a in authorship.credited(m)] or [{"name": cfg["publisher"]}]
     url = _url(cfg, "book", book=slug)
     doc = {
         "cff-version": "1.2.0",
@@ -232,7 +319,7 @@ def citation(book: Book, cfg: dict | None = None) -> str:
         "abstract": m.get("summary", ""),
         "url": url,
         "repository-code": repo_url(slug, cfg),
-        "license": ["CC-BY-4.0", "MIT"],
+        "license": [cfg["licences"]["text"]["spdx"], cfg["licences"]["code"]["spdx"]],
         "preferred-citation": {"type": "book", "title": m["title"], "authors": authors, "publisher": {"name": cfg["publisher"]},
                                "url": url, "notes": cfg["disclosure"]},
     }
@@ -241,6 +328,13 @@ def citation(book: Book, cfg: dict | None = None) -> str:
             return True
     return ("# Generated by re-check readme from book.toml. Don't edit by hand.\n"
             + yaml.dump(doc, Dumper=Plain, sort_keys=False, allow_unicode=True, width=1000))
+
+
+def cff_person(a: authorship.BookAuthor) -> dict:
+    """An author as CITATION.cff names a person: their family and given names, or a name used as it is as an alias."""
+    if a.literal:
+        return {"alias": a.literal}
+    return {"family-names": a.family, **({"given-names": a.given} if a.given else {})}
 
 
 def renovate() -> str:
@@ -254,10 +348,10 @@ def renovate_config() -> dict:
     return json.loads(renovate())
 
 
-def licence_code(cfg: dict | None = None) -> str:
+def licence_code(cfg: dict | None = None, manifest: dict | None = None) -> str:
+    """LICENSE-CODE: the code's licence, with the book's copyright line."""
     cfg = cfg or load_config()
-    return (TEMPLATES / "licenses" / "MIT.txt").read_text(encoding="utf-8").replace("Copyright (c) <year> <copyright holders>",
-                                                                                  cfg["code_copyright"])
+    return legal_code("code", cfg).replace("Copyright (c) <year> <copyright holders>", code_copyright(cfg, manifest))
 
 
 def weekly_cron(slug: str, cfg: dict | None = None) -> str:
@@ -304,13 +398,15 @@ def generated_names() -> set[str]:
 def files(book: Book, cfg: dict | None = None) -> dict[str, str]:
     cfg = cfg or load_config()
     return {"README.md": readme(book, cfg), "CITATION.cff": citation(book, cfg),
-            "LICENSE": (TEMPLATES / "licenses" / "CC-BY-4.0.txt").read_text(encoding="utf-8"), "LICENSE-CODE": licence_code(cfg),
+            "LICENSE": legal_code("text", cfg),
+            "LICENSE-CODE": licence_code(cfg, book.manifest),
             "renovate.json": renovate(), **workflows(cfg, book.slug)}
 
 
 def own_licences(cfg: dict | None = None) -> dict[str, str]:
-    """This repository's licences: MIT for its code, CC BY 4.0 for the writing standards and the prompts."""
-    return {"LICENSE": licence_code(cfg), "LICENSE-TEXT": (TEMPLATES / "licenses" / "CC-BY-4.0.txt").read_text(encoding="utf-8")}
+    """This repository's licences ([licences]): the code's for its code, the text's for the writing standards and the
+    prompts."""
+    return {"LICENSE": licence_code(cfg), "LICENSE-TEXT": legal_code("text", cfg)}
 
 
 def sync(root: Path, texts: dict[str, str], command: str, write: bool = False) -> list[str]:

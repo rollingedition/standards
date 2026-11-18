@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 from . import addressed as addressed_check, affected, base_image, bookfmt, catalog, checks, community, data_path, examples, kit, readme, resolve, rules, skill, spoken, style
+from . import commands, labscripts, stack
 from . import models as model_files
 
 
@@ -68,6 +69,7 @@ def cmd_manifest(args) -> int:
             problems.append(f"book.toml does not parse: {e}")
         else:
             problems += catalog.validate_book(book, tax)
+            problems += stack.manifest_problems(book)           # [lab]: which Lab, and what its stack runs
             notes = summary_notes(book)
     rc = report_dated("Book manifest", problems,
                       f"book.toml validates against taxonomy v{tax['version']} ({len(tax['skills'])} skills)",
@@ -163,6 +165,10 @@ def runtime_or_none(book) -> dict:
 
 def cmd_examples(args) -> int:
     book = bookfmt.load_book(Path(args.book))
+    if not book.examples and not (book.root / "examples" / ".python-version").exists():
+        # a terminal book with no Python example: nothing to build, and nothing to run
+        write_report(args, {"outcome": "passed", "runtime": {}, "passing": 0, "total": 0, "examples": []})
+        return report("Examples", [], "no Python examples, so no Python runtime to build")
     if (args.list or args.base_ref or args.recorded) and not args.affected:
         return report("Examples", ["--list, --base-ref and --recorded go with --affected"], "")
     try:
@@ -235,6 +241,86 @@ def run_examples_check(args, book: bookfmt.Book, backend: examples.Backend, seed
         return report("Examples", problems, f"{passing} of {len(results)} affected examples pass; the other "
                       f"{selection.total - len(results)} can't be affected by this change ({against}; {where})")
     return report("Examples", problems, f"{passing} of {len(results)} examples pass ({where})")
+
+
+def cmd_commands(args) -> int:
+    """A terminal book's steps and checks, chapter by chapter from a fresh start, in a terminal (commands.py)."""
+    book = bookfmt.load_book(Path(args.book))
+    if not book.steps:
+        write_report(args, {"outcome": "passed", "backend": {}, "passing": 0, "total": 0, "chapters": []})
+        return report("Commands", [], "no steps or checks: nothing to run")
+    if bad := [p for p in book.problems if ".sh" in p or "setup" in p or ("embeds examples/" in p and ".py" not in p)]:
+        return report("Commands", bad, "")              # the steps' own format problems: the section-ID check's too
+    runs = args.runs or (int(commands.settings()["runs"]) if args.record else 1)
+    try:
+        backend = commands.backend_for(book, args.backend,
+                                       block_network=os.environ.get("RE_COMMANDS_NETWORK", "blocked") == "blocked")
+        results, problems, differences = commands.run_book(book, backend, args.chapter or None, runs=runs,
+                                                            check_before=False if args.no_check_before else None)
+    except commands.CommandsError as e:
+        write_report(args, {"outcome": "error", "error": str(e), "backend": {}, "passing": 0, "total": 0, "chapters": []})
+        return report("Commands", [str(e)], "")
+    for run in results:
+        for r in run.results:
+            if r.phase == "chapter":
+                print(f"{r.verdict:9}  {run.chapter_id}  {r.kind} {r.step_id}  {r.seconds:.1f}s")
+    where = f"{backend.name} backend" + (", network blocked" if backend.describe().get("network") == "blocked" else "")
+    if args.record:
+        if problems:
+            write_report(args, commands.results_json(results, "failed", backend.describe()))
+            return report("Commands", problems, "")
+        found = commands.recordable(book, results)
+        for sid, text in found.items():
+            (book.root / "examples" / f"{sid}.out").write_text(text, encoding="utf-8")
+        write_report(args, commands.results_json(results, "recorded", backend.describe()))
+        n_checks = sum(book.steps[sid].kind == "check" for sid in found)
+        return report("Commands", [], f"recorded the output of {len(found) - n_checks} steps and {n_checks} checks "
+                      f"({where}; {runs} runs of each chapter printed the same)")
+    missing = commands.output_problems(book)
+    problems += [d for d in differences if "no recorded output" not in d] + missing
+    write_report(args, commands.results_json(results, "passed" if not problems else "failed", backend.describe()))
+    ran = [r for run in results for r in run.results if r.phase == "chapter"]
+    return report("Commands", problems, f"{sum(r.ok for r in ran)} of {len(ran)} steps and checks pass, in "
+                  f"{len(results)} chapter(s), each from a fresh start ({where})")
+
+
+def cmd_lab(args) -> int:
+    """A terminal book's local lab (labscripts.py): lab/start.sh, chapter.sh, check.sh and stop.sh, generated."""
+    book = bookfmt.load_book(Path(args.book))
+    if not stack.is_terminal(book.manifest):
+        return report("Local lab", [], "not a terminal book: it has no local lab")
+    problems, written = labscripts.check(book, write=args.write)
+    for rel in written:
+        print(f"wrote  {rel}")
+    names = ", ".join(n for n in labscripts.SCRIPTS[:-1]) + f" and {labscripts.SCRIPTS[-1]}"
+    return report("Local lab", problems, f"lab/{names} are " + ("written" if args.write else "up to date"))
+
+
+def cmd_stack(args) -> int:
+    """book.toml's [lab] and the stack's pins (stack.py): with --pin, examples/stack.toml written from stack.in.toml."""
+    root = Path(args.book)
+    book = bookfmt.load_book(root)
+    if args.pin:
+        try:
+            text = stack.pin(root, book.manifest, fetch=stack.http_fetch)
+        except (stack.StackError, OSError, ValueError) as e:
+            return report("Stack", [f"couldn't pin: {e}"], "")
+        _, source_text = stack.read_source(root)
+        refused = [p for p in stack.pinned_problems(stack.parse_pinned(text), stack.lab(book.manifest)["stack"],
+                                                    source_text) if "licence" in p or "open source" in p]
+        if refused:
+            return report("Stack", refused, "")
+        (root / stack.STACK).write_text(text, encoding="utf-8")
+        p = stack.parse_pinned(text)
+        n = lambda count, word: f"{count} {word}{'' if count == 1 else 's'}"   # noqa: E731
+        print(f"pinned {n(len(p.tools), 'tool')}, {n(len(p.charts), 'chart')} and {n(len(p.images), 'image')}")
+    problems, pinned = stack.check(root, book.manifest)
+    which = stack.lab(book.manifest)
+    if pinned is None and not problems:
+        return report("Stack", [], f"no stack to pin: the {which['kind']} Lab, with a stack of {which['stack']}")
+    return report("Stack", problems, f"a {which['stack']} stack: {len(pinned.tools) if pinned else 0} tool(s), "
+                  f"{len(pinned.charts) if pinned else 0} chart(s) and {len(pinned.images) if pinned else 0} image(s), "
+                  "each by SHA-256 or digest, every licence allowed")
 
 
 def cmd_style(args) -> int:
@@ -426,6 +512,33 @@ def build_parser() -> argparse.ArgumentParser:
                                                         "for this run alone, instead of the one kept")
     s.set_defaults(fn=cmd_examples)
 
+    s = sub.add_parser("commands", help="a terminal book's steps and checks: each chapter from a fresh start, its steps "
+                       "pasted into a login shell in a terminal and compared with their recorded output, its checks run "
+                       "beside it")
+    s.add_argument("--book", default=".")
+    s.add_argument("--backend", help="default: the book's stack's, local for plain shell steps")
+    s.add_argument("--chapter", action="append", default=[], metavar="ID", help="only this chapter; repeat it for more")
+    s.add_argument("--record", action="store_true", help="write each step's output as its recorded output, once every "
+                                                         "run of its chapter printed the same")
+    s.add_argument("--runs", type=int, help="run each chapter this many times, each from a fresh start, and fail when a "
+                                            "step prints differently (default: 1, or [run] runs with --record)")
+    s.add_argument("--no-check-before", action="store_true", help="don't run each check before its section's steps")
+    s.add_argument("--report", help="write the results as JSON")
+    s.set_defaults(fn=cmd_commands)
+
+    s = sub.add_parser("lab", help="a terminal book's local lab, for readers' own machines: lab/start.sh, chapter.sh, "
+                       "check.sh and stop.sh, generated from the book; --write writes them")
+    s.add_argument("--book", default=".")
+    s.add_argument("--write", action="store_true", help="write the scripts instead of checking them")
+    s.set_defaults(fn=cmd_lab)
+
+    s = sub.add_parser("stack", help="a terminal book's stack: book.toml's [lab], and examples/stack.toml in step with "
+                       "stack.in.toml, every file by SHA-256, every image by digest and every licence allowed; --pin "
+                       "writes stack.toml (needs the internet)")
+    s.add_argument("--book", default=".")
+    s.add_argument("--pin", action="store_true", help="write examples/stack.toml from examples/stack.in.toml")
+    s.set_defaults(fn=cmd_stack)
+
     s = sub.add_parser("style", help="the lint rules of the writing standards: lengths, time words, typed versions, bindings, banned words")
     s.add_argument("--book", default=".")
     s.add_argument("--config", help="writing.toml (default: this standards checkout)")
@@ -492,7 +605,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="with --refresh: add this Python, such as 3.13.17")
     s.set_defaults(fn=cmd_base_image)
 
-    s = sub.add_parser("licences", help="this repository's own licences: LICENSE (MIT, the code) and LICENSE-TEXT (CC BY 4.0, writing/ and prompts/)")
+    s = sub.add_parser("licences", help="this repository's own licences ([licences] in data/readme.toml): LICENSE "
+                                        "(the code's) and LICENSE-TEXT (the text's, for writing/ and prompts/)")
     s.add_argument("--write", action="store_true", help="regenerate the files instead of checking them")
     s.set_defaults(fn=cmd_licences)
 

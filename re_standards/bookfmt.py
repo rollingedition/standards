@@ -6,6 +6,7 @@ A book repo holds:
     chapters/NN-name.md        one chapter per file, in file-name order, with `chapter_id` in front matter
     examples/{example_id}.py   one runnable example per file; expected stdout in examples/{example_id}.out
     redirects.yml              retired ID -> successor ID
+    examples/{step_id}.sh      a terminal book's command step or check, with examples/{step_id}.out (steps.py)
 
 Inside a chapter, the first line after the front matter is the `# Title`. Every `##` and `###` heading is
 a section and carries an explicit, frozen ID: `## Why position matters {#why-position-matters}`. An
@@ -27,6 +28,8 @@ import yaml
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
+from . import authorship
+from . import stack as stack_pins, steps as step_format
 from .catalog import load_book as load_manifest
 
 ID_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
@@ -35,7 +38,7 @@ HEADING_ID = re.compile(r"\s*\{#([^}]*)\}\s*$")
 EMBED_HREF = re.compile(r"^(?:\.\./)?examples/([^/]+)\.py$")
 # Bindings (writing standards W-25, W-26): values the build fills in, so prose never types them.
 #   {{out:EXAMPLE_ID:LABEL}}  the value on the "LABEL: value" line of that example's recorded output
-#   {{version:PACKAGE}}       the version examples/requirements.txt pins
+#   {{version:PACKAGE}}       the version examples/requirements.txt pins, or a terminal book's examples/stack.toml
 BINDING = re.compile(r"\{\{\s*(out|version)\s*:\s*([^{}]+?)\s*\}\}")
 PIN = re.compile(r"^\s*([A-Za-z0-9_.\-\[\]]+?)\s*==\s*([^\s;#]+)")
 SECTION_LEVELS = (2, 3)
@@ -86,6 +89,7 @@ class Section:
     sha256: str
     example_ids: list[str] = field(default_factory=list)
     source: str = field(default="", repr=False)    # the text its sha256 covers, before normalizing: heading to next heading
+    step_ids: list[str] = field(default_factory=list)   # its steps, checks and files, in order (steps.py)
 
 
 @dataclass
@@ -94,6 +98,7 @@ class Embed:
     section_id: str | None      # None when embedded in the chapter's opening text
     start: int                  # 0-based body line range of the embedding paragraph
     end: int
+    kind: str = "python"        # python, or a terminal book's step, check or file (steps.py)
 
 
 @dataclass
@@ -108,6 +113,8 @@ class Chapter:
     sections: list[Section] = field(default_factory=list)
     embeds: list[Embed] = field(default_factory=list)
     opening: str = field(default="", repr=False)   # the opening text its sha256 covers, before normalizing
+    step_embeds: list[Embed] = field(default_factory=list)  # its steps, checks and files; `embeds` stays Python's
+    setup: list[str] = field(default_factory=list)          # front matter: earlier steps that bring a fresh start here
 
 
 @dataclass
@@ -130,6 +137,8 @@ class Book:
     redirects: dict[str, str]
     problems: list[str]                                      # format and ID problems: the section-ID check
     output_problems: list[str] = field(default_factory=list)  # missing expected outputs: the examples check
+    steps: dict[str, step_format.Step] = field(default_factory=dict)     # a terminal book's steps and checks
+    files: dict[str, step_format.FileRef] = field(default_factory=dict)  # and the files they read
 
     @property
     def slug(self) -> str:
@@ -148,6 +157,8 @@ class Book:
         out = {c.chapter_id: "chapter" for c in self.chapters}
         out.update({s.section_id: "section" for s in self.sections})
         out.update({e: "example" for e in self.examples})
+        out.update({s: step.kind for s, step in self.steps.items()})
+        out.update({f: "file" for f in self.files})
         return out
 
     def chapter(self, chapter_id: str) -> Chapter:
@@ -164,6 +175,9 @@ class Book:
         ex = self.examples.get(any_id)
         if ex and ex.chapter_id:
             return ex.chapter_id, ex.example_id
+        part = self.steps.get(any_id) or self.files.get(any_id)
+        if part and part.chapter_id:
+            return part.chapter_id, any_id
         return None
 
     @property
@@ -179,6 +193,8 @@ class Book:
         py = self.root / "examples" / ".python-version"
         if py.exists() and py.read_text(encoding="utf-8").strip():
             out["python"] = py.read_text(encoding="utf-8").strip()
+        if (self.root / stack_pins.STACK).exists():         # a terminal book's tools and charts (stack.py)
+            out.update({k: v for k, v in stack_pins.versions(self.root).items() if k not in out})
         return out
 
     def binding_value(self, kind: str, ref: str) -> tuple[str | None, str | None]:
@@ -186,7 +202,8 @@ class Book:
         if kind == "version":
             name = ref.strip().lower().replace("_", "-")
             v = self.pins.get(name)
-            return (v, None) if v else (None, f"{{{{version:{ref}}}}}: {ref} isn't pinned in examples/requirements.txt")
+            where = "examples/requirements.txt" + (" or examples/stack.toml" if (self.root / stack_pins.STACK).exists() else "")
+            return (v, None) if v else (None, f"{{{{version:{ref}}}}}: {ref} isn't pinned in {where}")
         eid, _, label = ref.partition(":")
         eid, label = eid.strip(), label.strip()
         ex = self.examples.get(eid)
@@ -323,12 +340,20 @@ def _embed_id(tokens: list[Token], i: int) -> str | None:
 
 
 def parse_chapter(path: Path, rel: str, order: int, first_section_order: int, md: MarkdownIt) -> tuple[Chapter | None, list[str]]:
+    return parse_chapter_text(path.read_text(encoding="utf-8"), rel, order, first_section_order, md)
+
+
+def parse_chapter_text(text: str, rel: str, order: int, first_section_order: int,
+                       md: MarkdownIt) -> tuple[Chapter | None, list[str]]:
+    """A chapter from its text, front matter first, as parse_chapter reads its file: `rel` is the file it's reported
+    as. A translation's chapter, assembled from its units, is parsed with this too, so it has the same sections and
+    embeds the English has."""
     problems: list[str] = []
-    text = path.read_text(encoding="utf-8").replace("\r\n", "\n")
+    text = text.replace("\r\n", "\n")
     meta, body, offset, fm_problem = split_front_matter(text)
     if fm_problem:
         return None, [f"{rel}: {fm_problem}"]
-    unknown = sorted(set(meta) - {"chapter_id"})
+    unknown = sorted(set(meta) - {"chapter_id", *TERMINAL_FRONT_MATTER})
     if unknown:
         problems.append(f"{rel}: unknown front matter keys: {', '.join(unknown)}")
     chapter_id = str(meta.get("chapter_id") or "")
@@ -341,6 +366,7 @@ def parse_chapter(path: Path, rel: str, order: int, first_section_order: int, md
     tokens = md.parse(body)
     headings: list[tuple[int, int, str, str | None]] = []    # (level, body line, text, id)
     embeds: list[tuple[int, int, str]] = []                   # (start, end, example id)
+    parts: list[tuple[int, int, str, str]] = []               # (start, end, kind, id): steps, checks and files
     for i, tok in enumerate(tokens):
         if tok.type == "heading_open":
             level = int(tok.tag[1])
@@ -350,6 +376,8 @@ def parse_chapter(path: Path, rel: str, order: int, first_section_order: int, md
             eid = _embed_id(tokens, i)
             if eid is not None:
                 embeds.append((tok.map[0], tok.map[1], eid))
+            elif (ref := _step_ref(tokens, i)) is not None:
+                parts.append((tok.map[0], tok.map[1], *ref))
 
     where = lambda body_line: f"{rel}:{body_line + offset + 1}"   # noqa: E731
     h1 = [h for h in headings if h[0] == 1]
@@ -402,6 +430,8 @@ def parse_chapter(path: Path, rel: str, order: int, first_section_order: int, md
         chapter.embeds.append(Embed(eid, owner.section_id if owner else None, start, end))
         if owner:
             owner.example_ids.append(eid)
+    if parts or "setup" in meta:
+        problems += _chapter_parts(chapter, meta, parts, rel)
     return chapter, problems
 
 
@@ -485,6 +515,8 @@ def load_book(root: Path) -> Book:
             claim(s.section_id, f"section in {c.file}:{s.line}")
     for eid, ex in examples.items():
         claim(eid, f"example {ex.file}")
+    steps, files, step_problems = _load_parts(root, chapters, claim)
+    problems += step_problems
 
     for c in chapters:
         for e in c.embeds:
@@ -504,7 +536,8 @@ def load_book(root: Path) -> Book:
 
     redirects, redirect_problems = load_redirects(root)
     problems += redirect_problems
-    book = Book(root, manifest, chapters, examples, redirects, problems, output_problems)
+    problems += authorship.chapter_problems(manifest, [c.chapter_id for c in chapters])   # an author's owned chapters
+    book = Book(root, manifest, chapters, examples, redirects, problems, output_problems, steps, files)
     live = book.ids()
     for old, new in redirects.items():
         if old in live:
@@ -524,7 +557,9 @@ def render_chapter(chapter: Chapter, example_html: Callable[[str], str],
                    link: Callable[[str], str | None] | None = None,
                    table_wrap: tuple[str, str] | None = None,
                    working_rule: tuple[str, ...] = (),
-                   heading_after: Callable[[Section], str] = lambda s: "") -> str:
+                   heading_after: Callable[[Section], str] = lambda s: "",
+                   unit_wrap: Callable[[str], tuple[str, str] | None] | None = None,
+                   step_html: Callable[[str, str], str] | None = None) -> str:
     """HTML for a chapter's body, without its # title. Section headings get their IDs; heading_extra's HTML goes
     inside a section's heading, and heading_after's right after it, so a heading can stay its title alone; embed
     paragraphs become whatever example_html returns; fenced code goes through code_block(code, language);
@@ -532,8 +567,12 @@ def render_chapter(chapter: Chapter, example_html: Callable[[str], str],
     internal link, [text](#any-id), into the href to use, so a link can reach another chapter; table_wrap is
     the HTML to open before each table and close after it. Inline code carries translate="no", so a browser's
     translation leaves it as it is. A paragraph that opens with one of the working_rule
-    labels in bold, as "**Working rule:**", gets class "working-rule", and its label class "working-rule-label"
-    with the colon kept for screen readers only."""
+    labels in bold, as "**Working rule:**" (or a full-width colon, as Chinese and Japanese write it), gets class
+    "working-rule", and its label class "working-rule-label" with the colon kept for screen readers only. unit_wrap,
+    given a unit's ID (the chapter's for its opening, a section's), returns the HTML to open before that unit and close
+    after it, or None to leave it as it is: a translated page wraps each unit it shows in English. step_html, given a
+    step's, check's or file's kind and ID, returns the HTML its paragraph becomes; without it, the paragraph stays a link.
+    A book with none renders the same with it or without."""
     md = new_markdown()
     if code_block is not None:
         md.options["highlight"] = lambda content, lang, attrs: code_block(content, lang)
@@ -549,6 +588,16 @@ def render_chapter(chapter: Chapter, example_html: Callable[[str], str],
                     child.attrSet("href", target)
     by_line = {s.line - chapter.body_offset - 1: s for s in chapter.sections}
     out: list[Token] = []
+    closing: list[str] = []                     # the open unit's closing HTML, while unit_wrap wraps one
+
+    def open_unit(unit: str) -> None:
+        if closing:
+            out.append(_html_block(closing.pop()))
+        found = unit_wrap(unit) if unit_wrap is not None else None
+        if found:
+            out.append(_html_block(found[0]))
+            closing.append(found[1])
+    open_unit(chapter.chapter_id)
     i = 0
     while i < len(tokens):
         tok = tokens[i]
@@ -562,6 +611,7 @@ def render_chapter(chapter: Chapter, example_html: Callable[[str], str],
                 _strip_heading_id(inline)
             section = by_line.get(tok.map[0])
             if section:
+                open_unit(section.section_id)
                 tok.attrSet("id", section.section_id)
                 out += [tok, inline]
                 extra = heading_extra(section)
@@ -584,6 +634,10 @@ def render_chapter(chapter: Chapter, example_html: Callable[[str], str],
             out.append(block)
             i += 3
             continue
+        if step_html is not None and (ref := _step_ref(tokens, i)) is not None:
+            out.append(_html_block(step_html(*ref)))
+            i += 3
+            continue
         if working_rule and tok.type == "paragraph_open":
             _mark_working_rule(tok, tokens[i + 1], working_rule)
         if table_wrap and tok.type in ("table_open", "table_close"):
@@ -594,7 +648,15 @@ def render_chapter(chapter: Chapter, example_html: Callable[[str], str],
             continue
         out.append(tok)
         i += 1
+    if closing:
+        out.append(_html_block(closing.pop()))
     return md.renderer.render(out, md.options, {})
+
+
+def _html_block(html: str) -> Token:
+    block = Token("html_block", "", 0)
+    block.content = html if html.endswith("\n") else html + "\n"
+    return block
 
 
 def _mark_working_rule(paragraph: Token, inline: Token, labels: tuple[str, ...]) -> None:
@@ -602,7 +664,7 @@ def _mark_working_rule(paragraph: Token, inline: Token, labels: tuple[str, ...])
     lead = 1 if kids and kids[0].type == "text" and not kids[0].content else 0     # markdown-it opens with an empty text
     strong, label, close = (kids[lead:lead + 3] + [None] * 3)[:3]
     if (strong is not None and strong.type == "strong_open" and label.type == "text" and close is not None
-            and close.type == "strong_close" and label.content.endswith(":") and label.content[:-1] in labels):
+            and close.type == "strong_close" and label.content.endswith((":", "：")) and label.content[:-1] in labels):
         paragraph.attrSet("class", "working-rule")
         strong.attrSet("class", "working-rule-label")
         label.content = label.content[:-1]
@@ -620,11 +682,111 @@ def _strip_heading_id(inline: Token) -> None:
 
 
 def machine_markdown(chapter: Chapter, example_block: Callable[[str], str],
-                     bind: Callable[[str], str] | None = None) -> str:
+                     bind: Callable[[str], str] | None = None,
+                     step_block: Callable[[Embed], str] | None = None) -> str:
     """The chapter's Markdown for machines: IDs kept for citation, embeds replaced by the example itself,
-    bindings filled in when bind is given."""
+    bindings filled in when bind is given. With step_block, each step, check and file is replaced by what it returns;
+    without it, each stays its link."""
     lines = chapter.body.split("\n")
-    for e in sorted(chapter.embeds, key=lambda e: e.start, reverse=True):
-        lines[e.start:e.end] = example_block(e.example_id).rstrip("\n").split("\n")
+    embeds = chapter.embeds + (chapter.step_embeds if step_block is not None else [])
+    for e in sorted(embeds, key=lambda e: e.start, reverse=True):
+        block = example_block(e.example_id) if e.kind == "python" else step_block(e)
+        lines[e.start:e.end] = block.rstrip("\n").split("\n")
     text = "\n".join(lines).strip("\n") + "\n"
     return bind(text) if bind else text
+
+
+# ---------------------------------------------------------------- a terminal book's steps, checks and files (steps.py)
+
+TERMINAL_FRONT_MATTER = ("setup",)
+
+
+def _only_link(tokens: list[Token], i: int) -> tuple[str, str] | None:
+    """(href, text) when tokens[i] opens a paragraph that is only a link."""
+    if tokens[i].type != "paragraph_open" or i + 2 >= len(tokens):
+        return None
+    children = [c for c in (tokens[i + 1].children or []) if not (c.type == "text" and not c.content.strip())]
+    if len(children) < 2 or children[0].type != "link_open" or children[-1].type != "link_close":
+        return None
+    if any(c.type in ("link_open", "link_close") for c in children[1:-1]):
+        return None
+    return str(children[0].attrGet("href") or ""), "".join(c.content for c in children[1:-1])
+
+
+def _step_ref(tokens: list[Token], i: int) -> tuple[str, str] | None:
+    """(kind, ID) when tokens[i] opens a paragraph that is only a link to a step, a check or a file (steps.embed_ref)."""
+    link = _only_link(tokens, i)
+    return step_format.embed_ref(*link) if link else None
+
+
+def _chapter_parts(chapter: Chapter, meta: dict, parts: list[tuple[int, int, str, str]], rel: str) -> list[str]:
+    """A chapter's steps, checks and files, each in its section, and its setup from front matter."""
+    problems: list[str] = []
+    for start, end, kind, pid in parts:
+        owner = None
+        for s in chapter.sections:
+            if s.line - chapter.body_offset - 1 <= start:
+                owner = s
+        chapter.step_embeds.append(Embed(pid, owner.section_id if owner else None, start, end, kind))
+        if owner:
+            owner.step_ids.append(pid)
+    setup = meta.get("setup", [])
+    if not isinstance(setup, list) or not all(isinstance(x, str) for x in setup):
+        problems.append(f"{rel}: setup lists the IDs of earlier chapters' steps, such as [create-namespace]")
+    else:
+        chapter.setup = list(setup)
+    return problems
+
+
+def _load_parts(root: Path, chapters: list[Chapter], claim: Callable[[str, str], None]) -> tuple[dict, dict, list[str]]:
+    """The book's steps and checks (examples/*.sh), the files its chapters embed, and their problems: each step
+    embedded once, its label saying what it is, and each chapter's setup naming earlier chapters' steps."""
+    steps, problems = step_format.load_steps(root, valid_id)
+    files: dict[str, step_format.FileRef] = {}
+    for sid, step in steps.items():
+        claim(sid, f"{step.kind} {step.file}")
+    seen_in: dict[str, int] = {}
+    for c in chapters:
+        for e in c.step_embeds:
+            where = f"{c.file}:{e.start + c.body_offset + 1}"
+            if e.kind == "file":
+                if e.example_id in files:
+                    problems.append(f"{c.file}: file {e.example_id!r} is embedded more than once")
+                    continue
+                link = _only_link(new_markdown().parse("\n".join(c.body.split("\n")[e.start:e.end])), 0)
+                found, why = step_format.load_file(root, link[0] if link else "", e.example_id)
+                if why:
+                    problems.append(f"{where}: {why}")
+                elif not valid_id(e.example_id):
+                    problems.append(f"{where}: {found.file}: a file's name, without its extension, is its ID: "
+                                    "lowercase words joined by hyphens")
+                else:
+                    found.chapter_id, found.section_id = c.chapter_id, e.section_id
+                    files[e.example_id] = found
+                    claim(e.example_id, f"file {found.file}")
+                continue
+            step = steps.get(e.example_id)
+            if step is None:
+                problems.append(f"{where}: embeds examples/{e.example_id}.sh, which doesn't exist")
+            elif step.chapter_id is not None:
+                problems.append(f"{c.file}: {step.kind} {e.example_id!r} is embedded more than once")
+            else:
+                step.chapter_id, step.section_id = c.chapter_id, e.section_id
+                seen_in[e.example_id] = c.order
+                if e.kind != step.kind:
+                    problems.append(f"{where}: {step.file} is a {step.kind}, so its link reads "
+                                    f"[{step_format.settings()['format']['labels'][step.kind]}: {e.example_id}]")
+    for sid, step in steps.items():
+        if step.chapter_id is None:
+            problems.append(f"{step.file}: not embedded in any chapter")
+    for c in chapters:
+        for sid in c.setup:
+            step = steps.get(sid)
+            if step is None or step.kind != "step":
+                problems.append(f"{c.file}: setup names {sid!r}, which isn't a step")
+            elif seen_in.get(sid, c.order) >= c.order:
+                problems.append(f"{c.file}: setup names {sid!r}, which isn't in an earlier chapter")
+            elif step.directives.background:
+                problems.append(f"{c.file}: setup names {sid!r}, which runs in the background: a chapter's start is "
+                                "what steps leave behind once they've ended")
+    return steps, files, problems

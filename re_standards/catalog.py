@@ -11,7 +11,7 @@ import tomllib
 from collections import Counter
 from pathlib import Path
 
-from . import cover, data_path
+from . import authorship, cover, data_path
 
 SLUG = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 QID = re.compile(r"^Q[1-9][0-9]*$")
@@ -103,7 +103,7 @@ def validate_book(book: dict, tax: dict, released: bool = False) -> list[str]:
     for s in book_skills:
         if s not in skills:
             errs.append(f"{who}: unknown skill {s} (add it to the taxonomy first)")
-    return errs
+    return errs + authorship.problems(book)       # a house book names no authors, and has none
 
 
 def book_areas(book: dict, tax: dict) -> list[str]:

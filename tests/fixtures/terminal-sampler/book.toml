@@ -1,0 +1,13 @@
+# A two-chapter sampler of command steps on plain shell, for the tests of the step format, the runner and the local
+# scripts. No stack: its steps need nothing but a shell.
+slug = "terminal-sampler"
+title = "A Terminal Sampler"
+summary = "How a terminal book's steps and checks work: a project folder, a small inventory file, and the commands that sort and filter it."
+status = "draft"
+level = "foundations"
+skills = ["data-pipelines"]
+line = "main"
+
+[lab]
+kind = "terminal"
+stack = "none"

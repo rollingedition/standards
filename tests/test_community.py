@@ -51,3 +51,22 @@ def test_the_repository_and_the_organization_get_a_readme(tmp_path):
     assert "(https://github.com/rollingedition/.github/blob/main/CONTRIBUTING.md)" in profile and "{" not in profile + out["README.md"]
     assert "Written with AI. Verified by people." in profile
     assert profile.rstrip().endswith("Written with AI. Verified by people.")         # the page ends with the disclosure
+
+
+def test_contributions_come_in_under_cc_by_and_mit_with_the_dco():
+    """What contributions come in under ([licences.contributions] in data/readme.toml): CC BY 4.0 for text and MIT for
+    code, each commit signed off under the DCO, so they can be published with a book under its own licences, the text's
+    with our added permission, and included when a book is licensed to others. The repository's README carries the
+    trademark notice, as every generated README does."""
+    out, _ = community.files()
+    guide = out["CONTRIBUTING.md"]
+    terms = guide.split("## Licences\n\n", 1)[1]
+    assert terms.startswith("You keep the copyright in what you contribute. When you open a pull request, you license your "
+                            "change under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) for text and "
+                            "[MIT](https://opensource.org/license/mit) for code, and you sign off each commit (`git commit "
+                            "-s`) to certify the [Developer Certificate of Origin](https://developercertificate.org/)")
+    assert ("under the book's own licences, [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) for text, with "
+            "[our added permission](https://rollingedition.com/reuse), and [MIT](https://opensource.org/license/mit) for "
+            "code, and include it when we license a book to others.") in terms
+    assert "{" not in terms
+    assert "are trademarks of Distributed LLC" in out["README.md"] and "{" not in out["README.md"]

@@ -12,3 +12,5 @@ GitHub uses these files for every repository in the Rolling Edition organization
 | [`profile/README.md`](profile/README.md) | The organization's page on GitHub |
 
 The books are at [rollingedition.com]({site}). These files are generated from templates in the [standards]({standards}) repository; to suggest a change, open an issue there.
+
+{trademark}

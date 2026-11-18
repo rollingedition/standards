@@ -1,4 +1,5 @@
-"""Cover SVG: the title, its punched tape, the edition fingerprint, the edition line and the footer.
+"""Cover SVG: the title, its punched tape, the edition fingerprint, an authored book's authors, the edition line and the
+footer.
 
 The executable form of the cover-generation spec. Layout is in 300 x 480 cover units; the 1600 x 2560
 master is the same layout scaled by 16/3. Standard library only, plus optional fontTools for real
@@ -8,6 +9,10 @@ On the site's pages the cover's text is live type, in the site's web fonts. A co
 everywhere else (a book's README, a download), and an image can't load a web font, so `outlined=True` draws the
 same text, in the same places, as outlines: the title's and the code's from data/cover-glyphs.json, generated from
 the fonts with their kerning and ligatures, and the wordmark's from data/mark-outlines.json.
+
+An authored book's cover names its authors, from its edition's release record, never typed: Literata 600 in
+`cover-paper`, at most two lines above the edition line, "Jane Doe and Sam Lee", or "Jane Doe and 3 others" when
+every name won't fit in two. A house book's cover names nobody and is exactly as it was.
 """
 from __future__ import annotations
 
@@ -41,6 +46,8 @@ LINE_SIZE, LINE_RISE = 11, 16          # the edition line: the edition number's 
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 FOOT_H, FOOT_GAP, MARK_SIZE = 22, 14, 22
 WORDMARK_SIZE, WORDMARK_GAP, CAP = 16, 6, 0.705   # the footer's wordmark: the icon is 1.4 times it
+AUTHOR_SIZE, AUTHOR_LEADING, AUTHOR_MAX_LINES = 13, 1.2, 2   # an authored book's authors, in the title's face
+AUTHOR_RISE = 22                      # the last author line's baseline above the edition line's
 
 # Tape geometry at scale k = 1. Every value scales with k when a long title needs three strips.
 P, HOLE, FEED, PAD, LEAD, GAP, CUT, TAIL_GAP = 8, 6, 3, 5, 2, 10, 8, 8
@@ -248,20 +255,73 @@ def edition_line(editions: int, first_released: str) -> str:
     return f"First edition, {since}" if editions == 1 else f"{editions} editions since {since}"
 
 
-def cover_alt(title: str, edition: str, code: str) -> str:
-    return f"Cover of {title}, edition {edition}, code {parse_code(code)}"
+def cover_alt(title: str, edition: str, code: str, authors: tuple[str, ...] | list[str] = ()) -> str:
+    """The cover's alt text; an authored book's names its authors as the cover does."""
+    by = f" by {' '.join(author_lines(list(authors)))}" if authors else ""
+    return f"Cover of {title}{by}, edition {edition}, code {parse_code(code)}"
+
+
+def _pieces(names: list[str]) -> list[str]:
+    """The names as a list says them, in pieces a line may break between: "Jane Doe,", "Sam Lee", "and Priya Rao"."""
+    if len(names) == 1:
+        return list(names)
+    return [f"{n}," if i < len(names) - 2 else n for i, n in enumerate(names[:-1])] + [f"and {names[-1]}"]
+
+
+def _wrap_pieces(pieces: list[str]) -> list[str]:
+    """Greedy, between pieces, so a name stays whole on its line; a piece too long for a line alone wraps at spaces."""
+    lines: list[str] = []
+    for piece in pieces:
+        trial = f"{lines[-1]} {piece}" if lines else piece
+        if lines and measure_text(trial, AUTHOR_SIZE) <= FIELD_W:
+            lines[-1] = trial
+        elif measure_text(piece, AUTHOR_SIZE) <= FIELD_W:
+            lines.append(piece)
+        else:
+            lines += wrap_title(piece, AUTHOR_SIZE)
+    return lines
+
+
+def author_lines(names: list[str]) -> list[str]:
+    """An authored book's authors as its cover sets them: every name, in at most two lines of the title's measure,
+    breaking between names, or else the first and how many others ("Jane Doe and 3 others"). Raises ValueError when
+    even that won't fit, which the manifest check reports first (authors_problem)."""
+    if not names:
+        return []
+    others = len(names) - 1
+    tries = [_pieces(names)] + ([[names[0], f"and {others} {'other' if others == 1 else 'others'}"]] if others > 1 else [])
+    for pieces in tries:
+        lines = _wrap_pieces(pieces)
+        if len(lines) <= AUTHOR_MAX_LINES and all(measure_text(line, AUTHOR_SIZE) <= FIELD_W for line in lines):
+            return lines
+    raise ValueError(f"the authors' names don't fit on the cover in {AUTHOR_MAX_LINES} lines: shorten {names[0]!r}")
+
+
+def authors_problem(names: list[str]) -> str | None:
+    """Why an authored book's names can't go on its cover, or None: a character the cover file can't draw, or a name
+    too long for two lines."""
+    drawable = glyphs()["title"]["glyphs"]
+    odd = sorted({ch for n in names for ch in n if ch not in drawable})
+    if odd:
+        return f"an author's name has a character the cover can't draw: {' '.join(odd)}"
+    try:
+        author_lines(names)
+    except ValueError as e:
+        return str(e)
+    return None
 
 
 def render_cover(title: str, edition: str, code: str, editions: int, first_released: str, width: int = MASTER_W,
-                 outlined: bool = False) -> str:
+                 outlined: bool = False, authors: tuple[str, ...] | list[str] = ()) -> str:
     """The SVG for one cover. `editions` counts released editions, including this one, and `first_released` is when
-    the first came out, for the edition line. `outlined` draws its text as outlines, for a cover file."""
+    the first came out, for the edition line. `outlined` draws its text as outlines, for a cover file. `authors` are an
+    authored edition's names, as its record credits them; none for a house book."""
     if editions < 1:
         raise ValueError("a cover needs at least one edition")
     size, lines = fit_title(title)
     tape = layout_tape(title, code)
     height = round(width * COVER_H / COVER_W)
-    alt = escape(cover_alt(title, edition, code))
+    alt = escape(cover_alt(title, edition, code, authors))
     o: list[str] = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {COVER_W} {COVER_H}" role="img" aria-label="{alt}">',
         f"<title>{alt}</title>",
@@ -294,9 +354,17 @@ def render_cover(title: str, edition: str, code: str, editions: int, first_relea
             f'<text x="{code_x:.2f}" y="{code_y:.2f}" font-family="\'IBM Plex Mono\', ui-monospace, monospace" '
             f'font-weight="500" font-size="{CODE_SIZE}" letter-spacing="{0.08 * CODE_SIZE:.2f}" fill="{COVER_TAIL}">{parse_code(code)}</text>'
         )
-    # footer: the edition line, then the icon, the wordmark and the edition number
+    # footer: an authored book's authors, the edition line, then the icon, the wordmark and the edition number
     foot_top = COVER_H - MARGIN_BOTTOM - FOOT_H
     line, line_y = edition_line(editions, first_released), foot_top - LINE_RISE
+    names = author_lines(list(authors))
+    for i, text in enumerate(names):
+        y_author = round(line_y - AUTHOR_RISE - (len(names) - 1 - i) * AUTHOR_SIZE * AUTHOR_LEADING, 2)
+        if outlined:
+            o.append(outlined_text(text, "title", AUTHOR_SIZE, MARGIN_X, y_author, COVER_PAPER))
+        else:
+            o.append(f'<text x="{MARGIN_X}" y="{y_author:g}" font-family="Literata, Georgia, serif" font-weight="600" '
+                     f'font-size="{AUTHOR_SIZE}" fill="{COVER_PAPER}">{escape(text)}</text>')
     if outlined:
         o.append(outlined_text(line, "mono", LINE_SIZE, MARGIN_X, line_y, COVER_MUTED))
     else:

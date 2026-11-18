@@ -29,13 +29,68 @@ editorial = "/policies/editorial"
 check = "/check"
 preview = "/previews/{book}"
 preview_chapter = "/previews/{book}/{chapter_id}"
+reuse = "/reuse"              # our added permission: using the books at work and in teaching ([licences.permission])
+
+# The licences, named here once. Every book's generated files read them, and so do the platform's pages, files, agent
+# skills and MCP server, so changing a licence is these lines and its fetched text.
+# - text: every book's text, and its agent skill, prompts, translations and narration; this repository's writing
+#   standards (writing/) and prompts (prompts/). Its legal code, under templates/, is every book's LICENSE and this
+#   repository's LICENSE-TEXT, fetched verbatim by templates/fetch.py and never edited.
+# - code: every book's code examples, and this repository's code (LICENSE-CODE in a book, LICENSE here).
+# - permission: what we allow beyond the text's licence, on a page of its own ([paths] reuse) that every licence notice
+#   links to, in words and as ccREL's cc:morePermissions where a format has a place for it. The licence itself is never
+#   edited.
+# - contributions: what changes come in under, with a Developer Certificate of Origin sign-off, so they can be published
+#   with a book under its licences and included when we license a book to others.
+# Data and fonts keep their own licences, beside them.
+[licences.text]
+name = "CC BY-NC 4.0"
+title = "Creative Commons Attribution-NonCommercial 4.0 International"
+spdx = "CC-BY-NC-4.0"
+url = "https://creativecommons.org/licenses/by-nc/4.0/"
+legal_code = "licenses/CC-BY-NC-4.0.txt"
+
+[licences.code]
+name = "MIT"
+title = "MIT License"
+spdx = "MIT"
+url = "https://opensource.org/license/mit"
+legal_code = "licenses/MIT.txt"
+
+[licences.permission]
+title = "Using our books at work and in teaching"   # the page's title, and the words of a link to it
+link = "our added permission"                        # a link's words where a sentence names the licence before it
+
+[licences.contributions]
+text = "CC BY 4.0"
+text_url = "https://creativecommons.org/licenses/by/4.0/"
+code = "MIT"
+code_url = "https://opensource.org/license/mit"
+dco = "https://developercertificate.org/"
+
+# Our name and marks, which no licence covers: on every generated README, the terms and the permission page. `holder` is
+# the platform's [policies.terms] seller, kept in step by a platform test.
+[trademark]
+holder = "Distributed LLC"
+notice = "Rolling Edition, its logo and the edition stamp are trademarks of {holder}. The licences cover our books' words and code, not our name or marks. You may say your work is based on a Rolling Edition book, but you may not use our name, logo or stamp to suggest that your work is ours, that we endorse it, or that we verified it."
 
 # How a book may be reused, as every page of rollingedition.com words it: [reuse] in the platform's config, kept in
-# step by a platform test. CC BY 4.0 asks for credit, a link to the licence and a note of changes; MIT asks that its
-# copyright and permission notice stay with the code. {copyright} is code_copyright, above.
+# step by a platform test. The text's licence asks for credit, a link to the licence and a note of changes, and our
+# permission adds use at work and in teaching; MIT asks that its copyright and permission notice stay with the code.
+# {text} and {code} are the licences' names ([licences]); {copyright} is code_copyright, above.
 [reuse]
-short = "Text is CC BY 4.0 and code is MIT. Credit Rolling Edition, link back to the book and to the licence, and say what you changed."
-full = "Book text is CC BY 4.0: credit Rolling Edition, link back to the book and to the licence, and say what you changed. Code examples are MIT: keep the notice “{copyright}” and the MIT terms with any code you copy."
+short = "Text is {text}, and free to use at work and in teaching. Code is {code}. Credit Rolling Edition, link back to the book and to the licence, and say what you changed."
+full = "Book text is {text}, and free to use at work and in teaching: credit Rolling Edition, link back to the book and to the licence, and say what you changed. Code examples are {code}: keep the notice “{copyright}” and the {code} terms with any code you copy."
+
+# An authored book (book.toml's [[authors]], once it's active) names its authors where a house book names Rolling Edition:
+# in its byline, the code's copyright and how it may be reused. Each author keeps their copyright, and the text and the
+# code keep the books' licences ([licences]). {authors} is their names: "Jane Doe and Sam Lee" in the byline, and "Jane
+# Doe, Sam Lee" before Rolling Edition. A house book keeps the words above.
+[authored]
+byline = "By {authors}, with Rolling Edition"
+code_copyright = "Copyright (c) {authors}, Rolling Edition and contributors"
+reuse = "Book text is {text}, and free to use at work and in teaching: credit {authors} and Rolling Edition, link back to the book and to the licence, and say what you changed. Code examples are {code}: keep the notice “{copyright}” and the {code} terms with any code you copy."
+interests = "Disclosed interests"     # the heading of each author's interests, as book.toml's `interests` gives them
 
 # A book's own check workflows (.github/workflows/, from templates/book/workflows/). A pull request runs only the
 # examples its change could affect; once a week every example runs again on main, which catches what no change shows,

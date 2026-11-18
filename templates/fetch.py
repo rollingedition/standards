@@ -10,7 +10,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SOURCES = {
-    "licenses/CC-BY-4.0.txt": "https://creativecommons.org/licenses/by/4.0/legalcode.txt",
+    # the books' text licence (data/readme.toml [licences.text]): every book's LICENSE, this repository's LICENSE-TEXT
+    # and the agent skills' catalog's LICENSE
+    "licenses/CC-BY-NC-4.0.txt": "https://creativecommons.org/licenses/by-nc/4.0/legalcode.txt",
     "licenses/MIT.txt": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/MIT.txt",
     "community/contributor-covenant-2.1.md":
         "https://raw.githubusercontent.com/EthicalSource/contributor_covenant/release/content/version/2/1/code_of_conduct.md",

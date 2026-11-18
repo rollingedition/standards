@@ -66,7 +66,7 @@ def test_contributions_come_in_under_cc_by_and_mit_with_the_dco():
                             "[MIT](https://opensource.org/license/mit) for code, and you sign off each commit (`git commit "
                             "-s`) to certify the [Developer Certificate of Origin](https://developercertificate.org/)")
     assert ("under the book's own licences, [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) for text, with "
-            "[our added permission](https://rollingedition.com/reuse), and [MIT](https://opensource.org/license/mit) for "
+            "[our added permission](https://rollingedition.com/policies/reuse), and [MIT](https://opensource.org/license/mit) for "
             "code, and include it when we license a book to others.") in terms
     assert "{" not in terms
     assert "are trademarks of Distributed LLC" in out["README.md"] and "{" not in out["README.md"]

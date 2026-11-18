@@ -102,8 +102,8 @@ def test_the_front_page_asks_reusers_to_credit_and_link_back(tmp_path):
     names it. The trademark notice follows."""
     text = readme.readme(book_at(tmp_path))
     licence = text.split("## Licence\n\n", 1)[1]
-    assert licence.startswith("Text: [CC BY-NC 4.0](LICENSE), with our added permission: [Using our books at work and in "
-                              "teaching](https://rollingedition.com/reuse). Code examples: [MIT](LICENSE-CODE).\n")
+    assert licence.startswith("Text: [CC BY-NC 4.0](LICENSE), with our added permission: [Reuse our books]"
+                              "(https://rollingedition.com/policies/reuse). Code examples: [MIT](LICENSE-CODE).\n")
     assert ("Book text is CC BY-NC 4.0, and free to use at work and in teaching: credit Rolling Edition, link back to the "
             "book and to the licence, and say what you changed. Code examples are MIT: keep the notice “Copyright (c) "
             "Rolling Edition and contributors” and the MIT terms with any code you copy. We'd be glad of a link back for "
@@ -120,7 +120,7 @@ def test_the_licences_are_named_once():
     assert lic["text"] == {"name": "CC BY-NC 4.0", "title": "Creative Commons Attribution-NonCommercial 4.0 International",
                            "spdx": "CC-BY-NC-4.0", "url": "https://creativecommons.org/licenses/by-nc/4.0/",
                            "legal_code": "licenses/CC-BY-NC-4.0.txt"}
-    assert lic["code"]["spdx"] == "MIT" and lic["permission"]["url"] == "https://rollingedition.com/reuse"
+    assert lic["code"]["spdx"] == "MIT" and lic["permission"]["url"] == "https://rollingedition.com/policies/reuse"
     assert lic["contributions"]["text"] == "CC BY 4.0" and lic["contributions"]["code"] == "MIT"
     assert readme.legal_code("text").startswith("Attribution-NonCommercial 4.0 International")
     assert "NonCommercial means not primarily intended for or directed towards" in readme.legal_code("text")

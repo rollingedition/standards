@@ -209,6 +209,6 @@ say = "A table of the mean difference, interval and p-value of each change this 
 
 ## Licence
 
-Code: [MIT](LICENSE). The writing standards in `writing/` and the agents' prompts in `prompts/`: [CC BY-NC 4.0](LICENSE-TEXT), with our added permission: [Using our books at work and in teaching](https://rollingedition.com/reuse). `re-check licences` writes both files from `data/readme.toml`'s `[licences]`, which names every licence the books' generated files and the platform use.
+Code: [MIT](LICENSE). The writing standards in `writing/` and the agents' prompts in `prompts/`: [CC BY-NC 4.0](LICENSE-TEXT), with our added permission: [Reuse our books](https://rollingedition.com/policies/reuse). `re-check licences` writes both files from `data/readme.toml`'s `[licences]`, which names every licence the books' generated files and the platform use.
 
 `data/mark-outlines.json` and `data/cover-glyphs.json` hold letter outlines from two typefaces, each under the SIL Open Font License 1.1: Literata ([licence](templates/licenses/OFL-Literata.txt)), and IBM Plex Mono ([licence](templates/licenses/OFL-IBM-Plex-Mono.txt)), whose reserved name the outlines don't take. The other texts in `templates/licenses/`, and the Contributor Covenant in `templates/community/`, belong to their publishers: `templates/fetch.py` copies them verbatim.

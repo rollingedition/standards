@@ -29,7 +29,7 @@ editorial = "/policies/editorial"
 check = "/check"
 preview = "/previews/{book}"
 preview_chapter = "/previews/{book}/{chapter_id}"
-reuse = "/reuse"              # our added permission: using the books at work and in teaching ([licences.permission])
+reuse = "/policies/reuse"     # our added permission, "Reuse our books" ([licences.permission]), beside the terms
 
 # The licences, named here once. Every book's generated files read them, and so do the platform's pages, files, agent
 # skills and MCP server, so changing a licence is these lines and its fetched text.
@@ -58,7 +58,7 @@ url = "https://opensource.org/license/mit"
 legal_code = "licenses/MIT.txt"
 
 [licences.permission]
-title = "Using our books at work and in teaching"   # the page's title, and the words of a link to it
+title = "Reuse our books"                           # the page's title, and the words of a link to it (the founder, Nov 18)
 link = "our added permission"                        # a link's words where a sentence names the licence before it
 
 [licences.contributions]

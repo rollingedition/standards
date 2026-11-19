@@ -1,0 +1,6 @@
+{"index": {"_index": "products", "_id": "1"}}
+{"name": "Desk lamp", "price": 24}
+{"index": {"_index": "products", "_id": "2"}}
+{"name": "Floor lamp", "price": 89}
+{"index": {"_index": "products", "_id": "3"}}
+{"name": "Bookshelf", "price": 120}

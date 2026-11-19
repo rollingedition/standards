@@ -29,6 +29,10 @@ pin complete, every licence allowed. {{version:k3s}} binds from stack.toml as {{
 requirements.txt.
 
 A book with no .py example needs no Python runtime: its examples check passes with nothing to build.
+
+A compose stack's services are in examples/compose.yaml, which the author writes: every image named by a digest
+stack.toml pins (REF@sha256:…), nothing built, no port beyond loopback, nothing privileged or on the host's network,
+and no mount outside the book's examples folder (compose_problems).
 """
 from __future__ import annotations
 
@@ -46,6 +50,7 @@ from . import steps as step_format
 
 STACK_IN = "examples/stack.in.toml"
 STACK = "examples/stack.toml"
+COMPOSE = "examples/compose.yaml"           # a compose stack's services, every image by a digest stack.toml pins
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 IMAGE = re.compile(r"^(?:(?P<registry>[a-z0-9.-]+(?::\d+)?)/)?(?P<repo>[a-z0-9]+(?:[._/-][a-z0-9]+)*):(?P<tag>[\w][\w.+-]{0,127})$")
@@ -177,6 +182,9 @@ def source_problems(data: dict) -> list[str]:
     for ref, image in (data.get("images") or {}).items():
         if not IMAGE.match(ref):
             out.append(f"{STACK_IN}: {ref!r} isn't an image with a tag, such as \"quay.io/strimzi/kafka:0.45.0\"")
+        elif ref.rsplit(":", 1)[1] == "latest":
+            out.append(f"{STACK_IN}: {ref} is the latest tag, which the cluster pulls every time and which moves: pin an "
+                       "image's own version")
         if not isinstance(image, dict):
             out.append(f"{STACK_IN}: [images.\"{ref}\"] is a table, with its licence")
     return out
@@ -248,6 +256,45 @@ def pinned_problems(pinned: Pinned, stack: str, source_text: str) -> list[str]:
     return out
 
 
+MANIFEST_IMAGE = re.compile(r"""^\s*(?:-\s*)?image:\s*["']?([^"'\s#]+)""", re.MULTILINE)
+PULL_ALWAYS = re.compile(r"""^\s*(?:-\s*)?imagePullPolicy:\s*["']?Always\b""", re.MULTILINE)
+
+
+def full_ref(ref: str) -> str:
+    """An image's name as the cluster keeps it, Docker Hub's written out: "postgres:16" -> docker.io/library/postgres:16."""
+    registry, repo, tag = _registry(ref)
+    return f"{registry}/{repo}:{tag}"
+
+
+def image_problems(root: Path, pinned: Pinned) -> list[str]:
+    """W-74: each image the book's manifests (examples/**/*.yaml) name is one the stack pins, by its tag, never by a
+    digest the cluster can't find or as latest, and none asks to be pulled every time: a Lab's cluster has no registry."""
+    pinned_refs = {full_ref(i["ref"]) for i in pinned.images if IMAGE.match(i.get("ref", ""))}
+    out = []
+    for path in sorted(p for pattern in ("*.yaml", "*.yml") for p in (Path(root) / "examples").rglob(pattern)):
+        rel = path.relative_to(root).as_posix()
+        if rel == COMPOSE:
+            continue                                      # a compose stack's file names its images by digest
+                                                          # (compose_problems), since docker compose pulls by tag
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for m in MANIFEST_IMAGE.finditer(text):
+            ref, line = m.group(1), text.count("\n", 0, m.start()) + 1
+            if "{{" in ref or "$" in ref:
+                continue                                  # a template's value, filled in elsewhere
+            if "@" in ref:
+                out.append(f"{rel}:{line}: {ref} names an image by digest: name it by the tag {STACK} pins, which "
+                           "holds its digest")
+            elif not IMAGE.match(ref) or ref.rsplit(":", 1)[1] == "latest":
+                out.append(f"{rel}:{line}: {ref} has no version of its own: name it by the tag {STACK} pins")
+            elif full_ref(ref) not in pinned_refs:
+                out.append(f"{rel}:{line}: {ref} isn't an image {STACK} pins, so the cluster can't run it: add it to "
+                           f"{STACK_IN}'s [images], then run re-check stack --pin")
+        for m in PULL_ALWAYS.finditer(text):
+            out.append(f"{rel}:{text.count(chr(10), 0, m.start()) + 1}: imagePullPolicy: Always pulls every time, and a "
+                       "Lab's cluster has no registry: leave it out, or write IfNotPresent")
+    return out
+
+
 def check(root: Path, manifest: dict | None) -> tuple[list[str], Pinned | None]:
     """`re-check stack`: (problems, the pins). A book whose Lab is the notebook Lab, with no stack files, has none."""
     root = Path(root)
@@ -266,7 +313,8 @@ def check(root: Path, manifest: dict | None) -> tuple[list[str], Pinned | None]:
         return problems, pinned
     problems += source_problems(source)
     if pinned is not None:
-        return problems + pinned_problems(pinned, stack, text), pinned
+        problems += pinned_problems(pinned, stack, text) + image_problems(root, pinned)
+        return problems + (compose_problems(root, pinned) if stack == "compose" else []), pinned
     for ref, image in (source.get("images") or {}).items():           # what --pin would refuse, said before it runs
         if isinstance(image, dict) and (why := licence_problem(image.get("licence", ""), f"image {ref}")):
             problems.append(why)
@@ -274,6 +322,52 @@ def check(root: Path, manifest: dict | None) -> tuple[list[str], Pinned | None]:
         if isinstance(chart, dict) and (why := licence_problem(chart.get("licence", ""), f"chart {name}")):
             problems.append(why)
     return problems + [f"{STACK} is missing: run re-check stack --pin"], None
+
+
+# ---------------------------------------------------------------- a compose stack's file (TL13)
+
+
+def compose_problems(root: Path, pinned: Pinned | None) -> list[str]:
+    """What examples/compose.yaml gets wrong for a compose stack: every service's image named by a digest stack.toml
+    pins, nothing built, no port beyond loopback, nothing privileged, on the host's network, or mounting a path outside
+    the book's examples folder."""
+    import yaml
+    path = Path(root) / COMPOSE
+    if not path.exists():
+        return [f"a compose stack's services are in {COMPOSE}: write it, every image by its digest"]
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as e:
+        return [f"{COMPOSE} isn't valid YAML: {e}"]
+    services = data.get("services") if isinstance(data, dict) else None
+    if not isinstance(services, dict) or not services:
+        return [f"{COMPOSE} names its services under services:"]
+    pins = {f"{i.get('ref')}@{i.get('digest')}" for i in (pinned.images if pinned else [])}
+    out = []
+    for name, svc in services.items():
+        what = f"{COMPOSE}: service {name}"
+        if not isinstance(svc, dict):
+            out.append(f"{what} is a table")
+            continue
+        image = str(svc.get("image", ""))
+        if "@sha256:" not in image:
+            out.append(f"{what}'s image is named by its digest, REF@sha256:…, as stack.toml pins it, not {image or 'none'}")
+        elif image not in pins:
+            out.append(f"{what}'s image {image} isn't one stack.toml pins: add it to {STACK_IN}, run re-check stack "
+                       "--pin, and name it by the digest it writes")
+        if "build" in svc:
+            out.append(f"{what} builds an image: a stack runs pinned images alone")
+        if svc.get("privileged") or svc.get("network_mode") == "host" or svc.get("pid") == "host":
+            out.append(f"{what} runs privileged, or on the host's network or processes: no stack may")
+        for port in svc.get("ports") or []:
+            text = str(port.get("host_ip", "") + ":" + str(port.get("published", "")) if isinstance(port, dict) else port)
+            if not (text.startswith("127.0.0.1:") or text.startswith("[::1]:")):
+                out.append(f"{what} publishes {port} beyond loopback: write it as 127.0.0.1:PORT:PORT")
+        for volume in svc.get("volumes") or []:
+            source = volume.get("source", "") if isinstance(volume, dict) else str(volume).split(":", 1)[0]
+            if str(source).startswith(("/", "~")) or ".." in str(source).split("/"):
+                out.append(f"{what} mounts {source}, outside the book's examples folder")
+    return out
 
 
 # ---------------------------------------------------------------- pinning (needs the internet)

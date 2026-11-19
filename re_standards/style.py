@@ -12,7 +12,7 @@ import tomllib
 import unicodedata
 from pathlib import Path
 
-from . import data_path, narrative
+from . import data_path, narrative, steps as step_format
 from .bookfmt import BINDING, HEADING_ID, Book
 
 WORD = re.compile(r"[A-Za-z0-9][A-Za-z0-9'’\-]*")
@@ -21,6 +21,15 @@ CODE_SPAN = re.compile(r"`[^`]*`")
 LINK_TARGET = re.compile(r"\]\([^)]*\)")
 IMAGE = re.compile(r"!\[([^\]]*)\]\(([^)]*)\)")
 EMBED_LINE = re.compile(r"^\s*\[Example:[^\]]*\]\([^)]*\)\s*$")
+LINK_LINE = re.compile(r"^\s*\[([^\]]*)\]\(([^)\s]*)\)\s*$")
+
+
+def is_embed(line: str) -> bool:
+    """A line that embeds an example, or a terminal book's step, check or file (steps.embed_ref): never prose."""
+    if EMBED_LINE.match(line):
+        return True
+    m = LINK_LINE.match(line)
+    return bool(m) and step_format.embed_ref(m.group(2), m.group(1)) is not None
 ID_LINK = re.compile(r"\]\(#([^)\s]+)\)")
 TABLE_RULE = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$")   # the line under a table's header
 FILE_LINK = re.compile(r"\]\((?:\.\./chapters/|\./)?\d\d-[^)\s]*\.md(?:#[^)\s]*)?\)")
@@ -46,7 +55,7 @@ def _prose_lines(body: str, offset: int, raw: bool = False) -> list[tuple[int, s
         if FENCE.match(line.strip()):
             fenced = not fenced
             continue
-        if fenced or EMBED_LINE.match(line):
+        if fenced or is_embed(line):
             continue
         out.append((n, line if raw else LINK_TARGET.sub("]", CODE_SPAN.sub(" ", BINDING.sub(" ", line)))))
     return out
@@ -79,7 +88,7 @@ def _section_parts(body: str, offset: int) -> list[tuple[int, list[tuple[str, in
             kind, start, text = blocks[-1]
             blocks[-1] = (kind, start, text + "\n" + line)
         else:
-            kind = ("embed" if EMBED_LINE.match(line) else "figure" if IMAGE.match(stripped) else "list" if LIST_ITEM.match(line)
+            kind = ("embed" if is_embed(line) else "figure" if IMAGE.match(stripped) else "list" if LIST_ITEM.match(line)
                     else "table" if stripped.startswith("|") else "quote" if stripped.startswith(">") else "paragraph")
             blocks.append((kind, n, line))
             open_block = True

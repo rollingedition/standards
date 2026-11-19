@@ -9,6 +9,13 @@ on:
   schedule:
     - cron: "{weekly_cron}"
   workflow_dispatch:
+  # {terminal}
+    inputs:
+      record:
+        description: Record every step's output instead, each chapter twice from a fresh start, as the run's artifact
+        type: boolean
+        default: false
+  # {/terminal}
 
 permissions:
   contents: read
@@ -18,3 +25,12 @@ jobs:
     uses: {org}/standards/.github/workflows/book-checks.yml@v1
     with:
       examples-scope: ${{ github.event_name == 'pull_request' && 'affected' || 'all' }}
+  # {terminal}
+  # A terminal book's steps and checks: its stack's pins, its local lab, and each chapter its change could affect, from a
+  # fresh start. Only a book whose book.toml says [lab] kind = "terminal" carries this job.
+  commands:
+    uses: {org}/standards/.github/workflows/book-commands.yml@v1
+    with:
+      scope: ${{ github.event_name == 'pull_request' && 'affected' || 'all' }}
+      record: ${{ github.event_name == 'workflow_dispatch' && inputs.record == true }}
+  # {/terminal}

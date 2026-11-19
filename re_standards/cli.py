@@ -14,10 +14,12 @@ import argparse
 import hashlib
 import json
 import os
+import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
-from . import addressed as addressed_check, affected, base_image, bookfmt, catalog, checks, community, data_path, examples, kit, readme, resolve, rules, skill, spoken, style
+from . import addressed as addressed_check, affected, base_image, bookfmt, catalog, checks, community, data_path, examples, kit, readme, resolve, rules, skill, spoken, style, voice
 from . import commands, labscripts, stack
 from . import models as model_files
 
@@ -71,6 +73,11 @@ def cmd_manifest(args) -> int:
             problems += catalog.validate_book(book, tax)
             problems += stack.manifest_problems(book)           # [lab]: which Lab, and what its stack runs
             notes = summary_notes(book)
+    try:                                                         # an authored book's voice.toml, beside book.toml
+        voiced = voice.load(Path(args.book))
+        problems += voice.problems(voiced, style.load_config()) if voiced is not None else []
+    except voice.VoiceError as e:
+        problems.append(str(e))
     rc = report_dated("Book manifest", problems,
                       f"book.toml validates against taxonomy v{tax['version']} ({len(tax['skills'])} skills)",
                       Path(args.book), book, args.base_ref)
@@ -251,37 +258,92 @@ def cmd_commands(args) -> int:
         return report("Commands", [], "no steps or checks: nothing to run")
     if bad := [p for p in book.problems if ".sh" in p or "setup" in p or ("embeds examples/" in p and ".py" not in p)]:
         return report("Commands", bad, "")              # the steps' own format problems: the section-ID check's too
+    if (args.base_ref or args.recorded or args.list or args.floor_days is not None) and not args.affected:
+        return report("Commands", ["--base-ref, --recorded, --floor-days and --list go with --affected"], "")
+    selection = None
+    if args.affected:
+        try:
+            selection = commands_selection(args, book)
+        except (commands.CommandsError, OSError, ValueError) as e:
+            return report("Commands", [f"couldn't tell which chapters a change affects: {e}"], "")
+        print(f"{len(selection.chapters)} of {selection.total} chapter(s) run" +
+              (f": every chapter, since {selection.why}" if selection.everything else ""))
+        if not selection.everything:
+            for cid, why in selection.chapters.items():
+                print(f"  {cid}: {'; '.join(why)}")
+        if args.list:
+            return 0
+        if not selection.chapters:
+            write_report(args, commands.results_json([], "passed", {}, book, selection=selection))
+            return report("Commands", [], f"no chapter can be affected by this change, so none of {selection.total} ran")
+    chapters = args.chapter or (selection.ids if selection and not selection.everything else None)
     runs = args.runs or (int(commands.settings()["runs"]) if args.record else 1)
+    at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    backend = None
     try:
         backend = commands.backend_for(book, args.backend,
                                        block_network=os.environ.get("RE_COMMANDS_NETWORK", "blocked") == "blocked")
-        results, problems, differences = commands.run_book(book, backend, args.chapter or None, runs=runs,
+        results, problems, differences = commands.run_book(book, backend, chapters, runs=runs,
                                                             check_before=False if args.no_check_before else None)
     except commands.CommandsError as e:
-        write_report(args, {"outcome": "error", "error": str(e), "backend": {}, "passing": 0, "total": 0, "chapters": []})
+        write_report(args, {"outcome": "error", "error": str(e), "backend": backend.describe() if backend else {},
+                            "passing": 0, "total": 0, "chapters": []})
         return report("Commands", [str(e)], "")
+    finally:
+        if backend is not None:
+            backend.close()
+    described = backend.describe()
     for run in results:
         for r in run.results:
             if r.phase == "chapter":
                 print(f"{r.verdict:9}  {run.chapter_id}  {r.kind} {r.step_id}  {r.seconds:.1f}s")
-    where = f"{backend.name} backend" + (", network blocked" if backend.describe().get("network") == "blocked" else "")
+    for cid, mib in (described.get("peak_memory_mib") or {}).items():
+        print(f"peak memory  {cid}  {mib} MiB" if mib is not None else f"peak memory  {cid}  not measured")
+    where = f"{backend.name} backend" + (", network blocked" if described.get("network") == "blocked" else "")
     if args.record:
         if problems:
-            write_report(args, commands.results_json(results, "failed", backend.describe()))
+            write_report(args, commands.results_json(results, "failed", described, book, at, selection))
             return report("Commands", problems, "")
         found = commands.recordable(book, results)
         for sid, text in found.items():
             (book.root / "examples" / f"{sid}.out").write_text(text, encoding="utf-8")
-        write_report(args, commands.results_json(results, "recorded", backend.describe()))
+        write_report(args, commands.results_json(results, "recorded", described, bookfmt.load_book(book.root), at,
+                                                 selection, recorded=True))
         n_checks = sum(book.steps[sid].kind == "check" for sid in found)
         return report("Commands", [], f"recorded the output of {len(found) - n_checks} steps and {n_checks} checks "
                       f"({where}; {runs} runs of each chapter printed the same)")
-    missing = commands.output_problems(book)
+    missing = [m for m in commands.output_problems(book)
+               if not chapters or book.steps[Path(m.split(":")[0]).stem].chapter_id in chapters]
     problems += [d for d in differences if "no recorded output" not in d] + missing
-    write_report(args, commands.results_json(results, "passed" if not problems else "failed", backend.describe()))
+    write_report(args, commands.results_json(results, "passed" if not problems else "failed", described, book, at,
+                                             selection))
     ran = [r for run in results for r in run.results if r.phase == "chapter"]
-    return report("Commands", problems, f"{sum(r.ok for r in ran)} of {len(ran)} steps and checks pass, in "
-                  f"{len(results)} chapter(s), each from a fresh start ({where})")
+    scope = (f", the {len(results)} of {selection.total} chapters this change could affect" if selection and
+             not selection.everything else f", in {len(results)} chapter(s)")
+    return report("Commands", problems, f"{sum(r.ok for r in ran)} of {len(ran)} steps and checks pass{scope}, each "
+                  f"from a fresh start ({where})")
+
+
+def commands_selection(args, book) -> commands.Selection:
+    """--affected: against the last run's record (--recorded), or the pull request's base (--base-ref), with the files
+    changed since that base; with neither, every chapter runs."""
+    previous, changed = None, None
+    if args.recorded:
+        data = json.loads(Path(args.recorded).read_text(encoding="utf-8"))
+        previous = data.get("record", data)
+    if args.base_ref:
+        diff = subprocess.run(["git", "-C", str(book.root), "diff", "--name-only", f"{args.base_ref}...HEAD"],
+                              capture_output=True, text=True)
+        if diff.returncode != 0:
+            raise commands.CommandsError(f"the base commit {args.base_ref} isn't in this checkout: "
+                                         f"{diff.stderr.strip()[-300:]}")
+        changed = [line for line in diff.stdout.splitlines() if line.strip()]
+        if previous is None:
+            with checks.scratch() as tmp:
+                base = checks.book_at_ref(book.root, args.base_ref, Path(tmp))
+                previous = dict(commands.record(base), runner=None) if base is not None else None
+    now = datetime.now(timezone.utc) if args.floor_days is not None else None
+    return commands.select_chapters(book, previous, changed, now, args.floor_days)
 
 
 def cmd_lab(args) -> int:
@@ -297,9 +359,27 @@ def cmd_lab(args) -> int:
 
 
 def cmd_stack(args) -> int:
-    """book.toml's [lab] and the stack's pins (stack.py): with --pin, examples/stack.toml written from stack.in.toml."""
+    """book.toml's [lab] and the stack's pins (stack.py): with --pin, examples/stack.toml written from stack.in.toml;
+    with --digest, the pins' digest; with --images, the stack's images exported for k3s (k3s.py)."""
     root = Path(args.book)
     book = bookfmt.load_book(root)
+    if args.digest or args.images:
+        try:
+            pinned = stack.read_pinned(root)
+        except stack.StackError as e:
+            return report("Stack", [str(e)], "")
+        if args.digest:
+            print(pinned.digest() if pinned else "none")
+            return 0
+        if pinned is None:
+            return report("Stack", [], "no stack: no images to export")
+        from . import k3s
+        out = Path(args.out) if args.out else k3s.images_dir(pinned)
+        try:
+            listed = k3s.export_images(pinned, out)
+        except commands.CommandsError as e:
+            return report("Stack", [f"couldn't export the images: {e}"], "")
+        return report("Stack", [], f"{len(listed)} image(s) exported by digest to {out}")
     if args.pin:
         try:
             text = stack.pin(root, book.manifest, fetch=stack.http_fetch)
@@ -327,7 +407,13 @@ def cmd_style(args) -> int:
     skip = {r.strip() for given in args.skip for r in given.split(",") if r.strip()}
     if bad := sorted(r for r in skip if not style.RULE_ID.match(r)):
         return report("Writing standards", [f"--skip takes rule IDs such as W-7, not {', '.join(map(repr, bad))}"], "")
-    cfg, wrong = style.with_limits(style.load_config(Path(args.config) if args.config else None), args.limit)
+    base = style.load_config(Path(args.config) if args.config else None)
+    try:                                                         # the book's own voice: its overrides, within bounds
+        voiced = voice.load(Path(args.book))
+    except voice.VoiceError:
+        voiced = None                                            # re-check manifest says why
+    voiced_cfg = voice.apply(base, voiced)
+    cfg, wrong = style.with_limits(voiced_cfg, args.limit)
     if wrong:
         return report("Writing standards", wrong, "")
     book = bookfmt.load_book(Path(args.book))
@@ -335,6 +421,7 @@ def cmd_style(args) -> int:
     words = sum(len(style.WORD.findall(t)) for c in book.chapters for _, t in style._prose_lines(c.body, c.body_offset))
     skipped = f" (skipping {', '.join(sorted(skip))})" if skip else ""
     skipped += f" (with {', '.join(args.limit)})" if args.limit else ""
+    skipped += " (with voice.toml's overrides)" if voiced_cfg is not base else ""
     rc = report_dated("Writing standards", problems,
                       f"{len(book.chapters)} chapter(s), {words:,} words of prose: the lint rules of the writing "
                       "standards pass" + skipped, book.root, book.manifest, args.base_ref)
@@ -523,7 +610,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--runs", type=int, help="run each chapter this many times, each from a fresh start, and fail when a "
                                             "step prints differently (default: 1, or [run] runs with --record)")
     s.add_argument("--no-check-before", action="store_true", help="don't run each check before its section's steps")
-    s.add_argument("--report", help="write the results as JSON")
+    s.add_argument("--affected", action="store_true", help="run only the chapters a change could affect, each with why, "
+                                                          "or every chapter when that can't be told, saying why")
+    s.add_argument("--base-ref", help="with --affected: the commit to compare with, such as a pull request's base")
+    s.add_argument("--recorded", help="with --affected: an earlier run's --report, or an edition's record, to compare with")
+    s.add_argument("--floor-days", type=float, help="with --affected and --recorded: a chapter whose last passing run is "
+                                                    "older than this runs too")
+    s.add_argument("--list", action="store_true", help="with --affected: print the selection and run nothing")
+    s.add_argument("--report", help="write the results as JSON, with the record a later --affected compares with")
     s.set_defaults(fn=cmd_commands)
 
     s = sub.add_parser("lab", help="a terminal book's local lab, for readers' own machines: lab/start.sh, chapter.sh, "
@@ -537,6 +631,11 @@ def build_parser() -> argparse.ArgumentParser:
                        "writes stack.toml (needs the internet)")
     s.add_argument("--book", default=".")
     s.add_argument("--pin", action="store_true", help="write examples/stack.toml from examples/stack.in.toml")
+    s.add_argument("--digest", action="store_true", help="print the pins' digest, which a change to any pin changes: the "
+                                                        "pull request's job caches the stack's files by it")
+    s.add_argument("--images", action="store_true", help="export each image the stack pins, by its digest, for k3s to "
+                                                        "import (needs the internet, and skopeo or docker)")
+    s.add_argument("--out", help="with --images: the folder (default: the cache's, by the pins' digest)")
     s.set_defaults(fn=cmd_stack)
 
     s = sub.add_parser("style", help="the lint rules of the writing standards: lengths, time words, typed versions, bindings, banned words")

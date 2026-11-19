@@ -70,12 +70,44 @@ replace = "<duration>"
 [masks.resource-version]
 pattern = '''(resourceVersion["']?\s*[:=]\s*["']?)\d+'''
 replace = '\g<1><resource-version>'
+[masks.job]
+# A job started with & in the step's own tab: bash prints its number, the same every run, and its process ID, which isn't
+pattern = '(?m)^(\[\d+\]\+?) \d+$'
+replace = '\g<1> <pid>'
 
-# Rules every step keeps, so it prints the same on every run
+# Rules every step keeps, so it prints the same on every run and runs anywhere: the writing standards' section 15. Each
+# is a Python regular expression matched against each line of a step's command and its waits, comment lines aside.
 [rules]
-# Waits, never sleep: a fixed pause is too short on a slow machine and wasted on a fast one. A line that runs sleep is
-# refused; `#| wait:` polls until what the step waits for is true.
+# W-71, waits, never sleep: a fixed pause is too short on a slow machine and wasted on a fast one. A line that runs sleep
+# is refused; `#| wait:` polls until what the step waits for is true.
 sleep = '(?:^|[;&|(]\s*|\b(?:then|do|else)\s+)sleep\s+[0-9.]'
+# W-70, the same on every run: what prints differently each time, unless a mask covers it
+random = '\$\{?S?RANDOM\b|\buuidgen\b|/dev/u?random\b'
+clock = '(?:^|[;&|(`]\s*|\$\(\s*|\b(?:then|do|else)\s+)date\b'      # the time, unless #| mask: time
+job = '(?:^|[^&|>])&\s*$'                       # a job started in the step's own tab: its PID, unless #| mask: job
+# W-74, nothing reaches the network: commands that download, and addresses beyond this machine and the cluster
+fetches = '\bhelm\s+(?:repo\s+(?:add|update)|pull|dependency\s+(?:update|build))\b|\bgit\s+(?:clone|fetch|pull)\b|\b(?:pip3?|npm|yarn|pnpm|apt-get|apt|apk|dnf|yum|brew|go|cargo|gem)\s+(?:install|add|get)\b|\b(?:docker|podman|crictl|nerdctl|ctr)\s+(?:images?\s+)?pull\b'
+url = '''\b(?:https?|oci|git|ssh|ftp)://(?:[^@/\s'"]*@)?(\[[^\]]*\]|[^/\s:'"]+)'''
+local_hosts = ["localhost", "127.0.0.1", "0.0.0.0", "[::1]"]
+local_suffixes = [".localhost", ".svc", ".svc.cluster.local", ".cluster.local"]
+local_networks = ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+
+# W-76, steps run in any bash: what bash 3.2 can't run, which macOS ships and readers' own machines run the local lab
+# with. Each name says what it refuses.
+[rules.bash32]
+"associative arrays (declare -A)" = '\b(?:declare|local|typeset|readonly)\s+-[a-zA-Z]*A'
+"namerefs (declare -n)" = '\b(?:declare|local|typeset)\s+-[a-zA-Z]*n\b'
+"mapfile and readarray" = '\b(?:mapfile|readarray)\b'
+"case changes in an expansion, such as ${name,,}" = '\$\{[A-Za-z_][A-Za-z_0-9]*(?:\[[^\]]*\])?(?:\^\^?|,,?)[^}]*\}'
+"transformations, such as ${name@Q}" = '\$\{[^}]*@[QEPAaKkuUL]\}'
+"negative array indexes" = '\$\{[A-Za-z_][A-Za-z_0-9]*\[-\d+\]\}'
+"&>> and |&" = '&>>|\|&'
+"coproc" = '\bcoproc\b'
+"wait -n" = '\bwait\s+-n\b'
+"globstar" = '\bshopt\s+-s\s+(?:\w+\s+)*globstar\b'
+"zero-padded or stepped ranges, such as {01..10}" = '\{-?0\d+\.\.-?\d+\}|\{-?\d+\.\.-?\d+\.\.-?\d+\}'
+";& and ;;& in case" = ';;&|;&\s*$'
+"$EPOCHSECONDS and $EPOCHREALTIME" = '\$\{?EPOCH(?:SECONDS|REALTIME)\b'
 
 # How every runner runs a chapter: the release's, the pull request's, the Lab's host and a reader's own machine.
 [run]
@@ -94,6 +126,38 @@ check_before = true               # a check must not pass before its section's s
 # The only environment a step sees, with HOME, the backend's own (such as KUBECONFIG) and nothing of the caller's
 env = { PATH = "/usr/local/bin:/usr/bin:/bin", LANG = "C.UTF-8", LC_ALL = "C.UTF-8", TZ = "UTC", NO_COLOR = "1", PAGER = "cat", GIT_PAGER = "cat", SYSTEMD_PAGER = "", KUBECTL_PAGER = "" }
 
+# A k3s stack's cluster, as the pull request's checks, the release's run and the Lab's machine start it (k3s.py): the same
+# fixed flags everywhere, so a chapter's cluster is the same wherever it runs. Installed from examples/stack.toml, every
+# file checked by its SHA-256, with no registry to pull from: an image the stack doesn't pin fails at once with
+# ImagePullBackOff, here as in a reader's Lab. Once Ready, the clean data dir is kept, and each chapter starts from it.
+[k3s]
+node_name = "lab"
+cluster_cidr = "10.42.0.0/16"
+service_cidr = "10.43.0.0/16"
+cluster_dns = "10.43.0.10"
+disable = ["traefik", "servicelb"]
+data_dir = "/var/lib/rancher/k3s"
+config_dir = "/etc/rancher/k3s"
+kubeconfig = "/etc/rancher/k3s/k3s.yaml"
+bin_dir = "/usr/local/bin"                # k3s itself
+tools_dir = "/opt/re-stack/bin"           # the stack's kubectl and helm, first on the steps' PATH
+snapshot_dir = "/var/lib/re-k3s/clean"    # the clean data dir, restored before each chapter
+# What a restore leaves in place: the image store's blobs, immutable and content-addressed, never written once imported
+snapshot_keep = ["agent/containerd/io.containerd.content.v1.content/"]
+unit = "re-k3s"                           # its systemd unit
+ready_seconds = 180                       # from starting k3s to the node Ready and kube-system's deployments Available
+ready_deployments = ["coredns", "local-path-provisioner", "metrics-server"]   # kube-system's, each Available first
+# No registry: no default endpoint, and every registry mirrored to a closed port on this machine
+mirror = "http://127.0.0.1:1"
+# Who the steps run as: a user of their own, so the network fence can hold their processes and nothing else's
+steps_user = "reader"
+as_user = ["sudo", "-n", "-E", "-u", "{user}", "--"]
+# Where downloads and the stack's images are kept between runs, by SHA-256 and by the stack's digest
+# (RE_STACK_CACHE overrides it); the pull request's job caches it by the stack's digest
+cache = "~/.cache/re-stack"
+images_tools = ["skopeo", "docker"]       # `re-check stack --images` exports each image by digest with the first found
+fence_chain = "RE-FENCE"                  # iptables: the steps' processes and the pods reach only the cluster
+
 # A book's Lab and its stack: book.toml's [lab], examples/stack.in.toml, which the author writes, and examples/stack.toml,
 # which `re-check stack --pin` generates from it, every file by URL and SHA-256 and every image by digest (stack.py).
 [stack]
@@ -107,6 +171,7 @@ lab_platform = "linux-amd64"
 platforms = ["linux-amd64", "linux-arm64", "darwin-arm64"]
 # The tools each stack needs pinned
 requires = { k3s = ["k3s", "kubectl", "k3d"], compose = [], none = [] }
+compose_wait_seconds = 300                # a compose stack's services, healthy, before a chapter's start fails
 
 # Each tool a stack may pin: its licence, where it runs, and where its files and their SHA-256 come from. In a URL,
 # {version} is the version as written, {version_url} the same with + escaped, {os} and {arch} the platform's.

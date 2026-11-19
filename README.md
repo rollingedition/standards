@@ -5,6 +5,7 @@ How a Rolling Edition book gets verified, in the open. This is the public, read-
 | Path | What |
 | --- | --- |
 | `.github/workflows/book-checks.yml` | The reusable workflow every book pull request runs: examples, book manifest, text addressed to a model, section IDs. `examples-scope` says which examples run: `all` (the default) or `affected` |
+| `.github/workflows/book-commands.yml` | The reusable workflow a terminal book's pull requests run, from its `checks.yml`'s `commands` job: the stack's pins and licences, the local lab, and each chapter the change could affect, from a fresh start, on a k3s cluster of its own for a k3s stack. `scope` is `all` (the default) or `affected`; `record`, by hand, records the outputs as the run's artifact. It does nothing for a book with no steps |
 | `.github/workflows/kind-label.yml` | The kind-label check, rerun whenever labels change. A pull request that changes only files a reader doesn't read on the page passes without a kind label: the book's narration files (`narration/`), its agent skill's procedures (`skill.md`) and its generated front page, licences, `renovate.json` and workflows. It has no kind of change and rides with the next edition |
 | `re_standards/rules.py`, `data/rules.toml` | When each newer rule of the checks took effect, so a new rule never stops a released book's pull requests (see Rules with dates) |
 | `data/taxonomy.json` | Areas and skills, the catalog's source of truth, anchored to Wikipedia and Wikidata |
@@ -12,10 +13,13 @@ How a Rolling Edition book gets verified, in the open. This is the public, read-
 | `re_standards/tape.py`, `cover.py` | The reference encoder: title tape, edition code, fingerprint, history tape and cover SVG. Anyone can decode a tape or recompute a code with it |
 | `data/cover-glyphs.json` | The letter outlines a cover file draws its text with, since an image can't load a web font. Generated from the fonts the site uses |
 | `re_standards/catalog.py` | Validates the taxonomy and `book.toml`, and builds the catalog |
+| `re_standards/voice.py`, `data/writing.toml` `[adjustable]` | An authored book's `voice.toml`, beside `book.toml`: the author's voice (`[profile]`: a summary, who speaks, a few traits), a `[glossary]`, words and phrases to `[avoid]`, and `[overrides]` of only the limits the writing standards mark adjustable, within their bounds: lengths, who speaks and the narrative limits that set the tone. Examples that run, versions and numbers, claims and their evidence, citations and accessibility stay as the standards say. `re-check manifest` checks it, and `re-check style` holds the book to it. A change to it alone rides with the next edition, as narration's does |
 | `re_standards/bookfmt.py`, `sections.py` | The book format: chapters, sections, examples and their frozen IDs, and `sections.json`, with three hashes for each chapter opening and section: `sha256`, of its source; `rendered_sha256`, of its text as read, with every binding filled in from that edition's recorded outputs and pins; and `content_sha256`, the same with each version binding left as written. A section changed when its text as read did, so a library update that moves a number an example prints changes it; when only a version number moved, its content didn't, and the change is a quiet one |
 | `re_standards/steps.py`, `data/commands.toml` | A terminal book's command steps, checks and files (see Terminal books): shell files at the top of `examples/`, embedded as Python examples are, with `#|` directives that Copy and Run leave out, and each chapter's `steps.json` for the Lab and the page. A book with none parses and renders as it did |
 | `re_standards/stack.py`, `data/commands.toml` | A terminal book's stack: `book.toml`'s `[lab]`, the versions the author writes in `examples/stack.in.toml`, and `examples/stack.toml`, generated from it by `re-check stack --pin`, every tool's file by URL and SHA-256, every chart's archive and every image by digest, with their licences (see Terminal books) |
 | `re_standards/commands.py` | The one runner for a terminal book's steps and checks, the pull request's, the release's and the Lab's: each chapter from a fresh start, its steps pasted into a bash login shell in a terminal and read through its shell-integration markers, its checks run beside it (see Terminal books) |
+| `data/renovate-stack.json` | What a terminal book's `renovate.json` adds to every book's: Renovate's managers for the versions in `examples/stack.in.toml` (k3s, kubectl, helm and k3d at their releases, charts from their repositories, images by tag) and the images its manifests name. A Python book's `renovate.json` is `data/renovate.json` alone |
+| `re_standards/k3s.py` | A k3s stack's backend for the runner: k3s installed from the stack's pins, each file checked by its SHA-256, with fixed flags, no registry and a network fence, and each chapter on the clean cluster, restored from a snapshot (see Terminal books) |
 | `re_standards/labscripts.py` | A terminal book's local lab, so anyone can work through it on their own machine: `lab/start.sh`, `chapter.sh`, `check.sh` and `stop.sh`, generated by `re-check lab --write` (see Terminal books) |
 | `re_standards/examples.py`, `harness.py`, `runtime/Dockerfile` | Runs every example in its pinned runtime and compares its output. Every runner starts it as `python -B -P -s` in a clean environment with the hash seed and every numeric library's threads fixed (`[run]` in `data/examples.toml`), so a run writes no bytecode and prints the same on any machine; runtimes are precompiled. `--seeds 0,1` runs each example under each hash seed and fails when any output differs; `--fresh` builds the venv in a new folder for that run alone |
 | `re_standards/base_image.py`, `data/runtime-base.toml` | The runtime image's base, `python:{version}-slim` for each Python a book pins, by digest, and its Debian packages by version. `re-check base-image --refresh` rewrites them from Docker Hub and Debian's index |
@@ -48,6 +52,9 @@ re-check stack --book path/to/book     # a terminal book's [lab] and stack pins;
 re-check lab --book path/to/book       # a terminal book's local lab (lab/*.sh) is up to date; --write writes it
 re-check commands --book path/to/book  # a terminal book's steps and checks, chapter by chapter from a fresh start; --record
                                        # writes their outputs once two runs of each chapter print the same; --chapter ID
+re-check commands --book path/to/book --affected --base-ref <base commit>   # only the chapters a change could affect,
+                                       # each with why; --recorded REPORT --floor-days 7 against an earlier run instead
+re-check stack --book path/to/book --images   # the stack's images, each by digest, for k3s to import (needs the internet)
 re-check section-ids --book path/to/book --base-ref <base commit> --previous latest
 re-check kind-label --labels kind:deps
 re-check kind-label --event "$GITHUB_EVENT_PATH" --book .   # a pull request's labels, and the files it changes
@@ -115,7 +122,7 @@ A step's first lines may be directives, which Copy and Run leave out (`data/comm
 | Directive | What it does |
 | --- | --- |
 | `wait` | Polled after the step until it exits 0; never compared. It may be repeated |
-| `mask` | Named masks from `[masks]`: age, pod-suffix, ip, uid, time, duration, resource-version |
+| `mask` | Named masks from `[masks]`: age, pod-suffix, ip, uid, time, duration, resource-version, and job, a background job's `[1] PID` |
 | `compare` | `exact` (after masks, the default), `lines` (the expected lines, in order) or `none` |
 | `tab`, `background` | Run in another tab, such as a port-forward; a background step runs until the chapter ends |
 | `timeout` | The step's limit in seconds, waits included (default 120) |
@@ -123,6 +130,8 @@ A step's first lines may be directives, which Copy and Run leave out (`data/comm
 | `expect-exit` | The exit code that counts as passing, when it isn't 0 |
 
 A step never runs `sleep`: it waits for what it needs with `wait`. A file is something the steps read, such as a manifest, and its ID is its name without the extension.
+
+The step format also holds the writing standards' rules for command chapters (section 15), line by line (`[rules]`): nothing that prints differently every run without its mask, such as `$RANDOM`, `date` or a job's process ID (W-70); nothing that downloads, and no address beyond the machine and the cluster (W-74); and nothing bash 3.2 can't run, since readers' Macs run the local lab with it (W-76). `re-check stack` refuses an image a manifest under `examples/` names that the stack doesn't pin by its tag, one named by digest or as `latest`, and `imagePullPolicy: Always`, since a Lab's cluster has no registry.
 
 ### The stack
 
@@ -149,6 +158,8 @@ Everything a Lab runs reaches readers' sessions, so it must be open source, and 
 
 A book with no Python example needs no Python runtime: `re-check examples` passes with nothing to build.
 
+**A compose stack** (`stack = "compose"`) runs services beside the steps, such as a search engine, from `examples/compose.yaml`, which the author writes. `re-check stack` holds it to four rules: every service's image is named by a digest `stack.toml` pins (`REF@sha256:…`), nothing is built, no port is published beyond loopback (`127.0.0.1:9200:9200`), and nothing runs privileged, on the host's network, or mounting a path outside the book's examples folder. The fixture `tests/fixtures/opensearch-sampler` is the services pilot: one OpenSearch node, two chapters. Its pinned digest is a placeholder of zeros until `re-check stack --pin` reads the registry's, before its first run.
+
 ### The runner
 
 `re-check commands` runs each chapter alone, from a fresh start: a workspace holding the book's `examples/` files (without the steps' own files and outputs) and, for a stack, its cluster; then the chapter's `setup`; then its steps in reading order. So chapters run in parallel, and a reader can start anywhere.
@@ -157,7 +168,13 @@ A book with no Python example needs no Python runtime: `re-check examples` passe
 - **A step passes** when each of its commands exits 0 and the last with its `expect-exit`. Then its waits are polled, and its output is compared with `examples/{id}.out` as its directives say. Its verdict is `same`, `different`, `ran` (nothing compared), `error` or `timeout`. An error or a timeout stops the chapter, since the steps after it build on it.
 - **A check runs beside the terminal,** never in it, in the main tab's folder, and is Passed or Not yet. Each check must also not pass before its section's steps run, so it checks something they do.
 - **Determinism:** `--record` runs each chapter twice (`[run] runs`), each from a fresh start, and writes the outputs only when every compared step printed the same after its masks.
-- **Backends** make the fresh start. `local` runs plain shell steps, a stack of `none`, in a scratch folder with the network blocked by `unshare -rn`, as the examples' venv backend is. A stack's backend plugs in with the same two calls, `start` and `stop`.
+- **Backends** make the fresh start, with the same two calls, `start` and `stop`. `local` runs plain shell steps, a stack of `none`, in a scratch folder with the network blocked by `unshare -rn`, as the examples' venv backend is. `k3s` (`re_standards/k3s.py`) runs each chapter on a cluster of its own:
+  - **Installed from the pins:** k3s for linux-amd64 and its airgap images, and the stack's kubectl and helm, each fetched once into a cache (`~/.cache/re-stack`, or `RE_STACK_CACHE`) and checked by its SHA-256. The stack's images come from `re-check stack --images`, which pulls each one by its digest and saves it under its tag. k3s imports them as it starts.
+  - **Fixed flags** (`[k3s]`): the node's name, the cluster's and services' addresses, traefik and servicelb off, no default registry endpoint, and every registry mirrored to a closed port. An image the stack doesn't pin fails at once with ImagePullBackOff, as it would in a reader's Lab.
+  - **Nothing reaches the network:** the steps run as a user of their own, and the fence lets that user's processes, and the pods, reach only the machine and the cluster.
+  - **The clean cluster:** once k3s is Ready, its data dir is kept. Before each chapter, k3s stops, the data dir is restored and k3s starts again, so every chapter starts from the same cluster, its certificates and system pods included. Each chapter's peak memory, k3s and its pods together, is in the report.
+  - **`compose`** brings a compose stack's services up from the workspace's `compose.yaml` with `docker compose up --wait --pull never`, so an image the stack doesn't pin fails at once, and takes them down with their volumes after each chapter.
+- **Which chapters run:** with `--affected`, a chapter runs when its steps, checks, setup or embedded files change (its `inputs_sha256` in `steps.json`), when one of its recorded outputs changes, or when it's new. Every chapter runs when the stack's pins change (their digest), when the code that runs the steps changes, or when another file under `examples/` changes, since any step may read it. Against an earlier run's record (`--recorded`), a chapter that didn't pass runs again, and with `--floor-days` so does one whose last passing run is older than that.
 
 ### On your own machine
 
@@ -165,7 +182,7 @@ Everything a terminal book teaches can be worked through free, on your own machi
 
 | Script | What it does |
 | --- | --- |
-| `lab/start.sh` | A workspace with the book's files, under `~/.rolling-edition/{slug}` (or `$RE_LAB_HOME`), and for a k3s stack the cluster in Docker through k3d, every tool fetched for your platform and checked by its pinned SHA-256, and k3s's image by digest. `. ~/.rolling-edition/{slug}/env.sh` then opens the workspace in your terminal |
+| `lab/start.sh` | A workspace with the book's files, under `~/.rolling-edition/{slug}` (or `$RE_LAB_HOME`), and for a k3s stack the cluster in Docker through k3d, every tool fetched for your platform and checked by its pinned SHA-256, and k3s's image by digest; for a compose stack its services in Docker, from `compose.yaml`. `. ~/.rolling-edition/{slug}/env.sh` then opens the workspace in your terminal |
 | `lab/chapter.sh CHAPTER_ID` | A fresh start for that chapter: the workspace (and the cluster) made again, then the chapter's setup steps, each one's waits polled |
 | `lab/check.sh ID ...` | Each check, or every check of a chapter, from where you are in the workspace: Passed, or Not yet with its hint |
 | `lab/stop.sh` | The cluster deleted; your files stay |

@@ -15,8 +15,18 @@ code = ["examples/*.py", "examples/*.out", "examples/data/*", "recordings/*", "p
 # them alone has no kind of change: it needs no kind label, cuts no edition of its own, and rides with the next one.
 narration = ["narration/*.toml"]
 skill = ["skill.md"]
+# An authored book's voice: how its drafting tools write, never on the page. Like narration, a change to it alone has no
+# kind of change and rides with the next edition; it's always the lead author's ([authors] lead_files).
+voice = ["voice.toml"]
 meta = ["book.toml", "redirects.yml", "CODEOWNERS", "renovate.json", "README.md", "CITATION.cff", "LICENSE",
         "LICENSE-CODE", ".gitignore", ".github/workflows/*"]
+
+# A terminal book's own files, classed only in a book whose book.toml on main says [lab] kind = "terminal": its stack's
+# pins and the local lab's scripts generated from them are deps, and its steps, checks and the files they read are code.
+# In any other book these stay unknown, and [flags.unknown-files] flags them, since nothing would run them.
+[terminal_files]
+deps = ["examples/stack.in.toml", "examples/stack.toml", "lab/*.sh"]
+code = ["examples/*.sh", "examples/*"]
 
 [tiers.auto]
 label = "tier:auto"
@@ -68,6 +78,11 @@ what = "Changes skill.md, the procedures a reader's coding agent follows, in a p
 reader = "Changes the instructions that readers' coding agents follow, unless the book's own agents made the change"
 files = ["skill.md"]
 authors = "contributors"       # anyone but the bot: the book's agents keep it current as the book changes
+
+[flags.new-stack-pin]
+what = "Adds a tool, chart or image to a terminal book's stack (examples/stack.in.toml) that it didn't pin before, or changes a pinned one's licence, its chart repository or its image's repository. A new version of something the stack already pins isn't flagged"
+reader = "Adds new software to what a book's Lab runs, or changes where it comes from or its licence. A new version of software the Lab already runs isn't flagged"
+files = ["examples/stack.in.toml"]
 
 [flags.book-identity]
 what = "Changes the book's slug, title, authors, sponsor or status in book.toml: what it's called, who it credits, who funds it and whether it's listed"

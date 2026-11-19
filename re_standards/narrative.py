@@ -21,6 +21,14 @@ from .bookfmt import BINDING, Book
 
 FENCE = re.compile(r"^(```|~~~)")
 EMBED_LINE = re.compile(r"^\s*\[Example:[^\]]*\]\([^)]*\)\s*$")
+LINK_LINE = re.compile(r"^\s*\[([^\]]*)\]\(([^)\s]*)\)\s*$")
+
+
+def _step_line(line: str) -> bool:
+    """A terminal book's step, check or file, embedded by a line that is only its link (steps.embed_ref)."""
+    from . import steps
+    m = LINK_LINE.match(line)
+    return bool(m) and steps.embed_ref(m.group(2), m.group(1)) is not None
 LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
 CODE_SPAN = re.compile(r"`[^`]*`")
 LINK = re.compile(r"(?<!!)\[([^\]]*)\]\([^)\s]*\)")
@@ -53,7 +61,7 @@ def blocks(body: str, offset: int) -> list[tuple[str, int, str]]:
             kind, start, text = out[-1]
             out[-1] = (kind, start, text + "\n" + line)
         else:
-            kind = ("embed" if EMBED_LINE.match(line) else "list" if LIST_ITEM.match(line)
+            kind = ("embed" if EMBED_LINE.match(line) or _step_line(line) else "list" if LIST_ITEM.match(line)
                     else "table" if stripped.startswith("|") else "quote" if stripped.startswith(">") else "paragraph")
             out.append((kind, n, line))
             open_block = True

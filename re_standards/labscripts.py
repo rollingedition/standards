@@ -61,6 +61,21 @@ def _prelude(book, purpose: str) -> list[str]:
     ]
 
 
+def _bash() -> list[str]:
+    """The bash the book's steps run with: a newer one where there is one, on the PATH first, then Homebrew's, since
+    macOS ships bash 3.2; else whichever there is. The steps keep to bash 3.2 either way (W-76)."""
+    return [
+        "steps_bash() {",
+        "  for b in \"$(command -v bash)\" /opt/homebrew/bin/bash /usr/local/bin/bash; do",
+        "    [ -x \"$b\" ] && \"$b\" -c '[ \"${BASH_VERSINFO[0]}\" -ge 4 ]' 2>/dev/null && { printf '%s\\n' \"$b\"; return 0; }",
+        "  done",
+        "  command -v bash || fail \"The book's steps run with bash: install it, then run this again.\"",
+        "}",
+        "bash_bin=$(steps_bash)",
+        "",
+    ]
+
+
 def _cluster(book) -> str:
     name = f"re-{book.slug}"[:CLUSTER_NAME_MAX].rstrip("-")
     return name
@@ -135,6 +150,25 @@ def _cluster_functions(book, pinned: stack_pins.Pinned | None) -> list[str]:
     ]
 
 
+def _services_functions(book) -> list[str]:
+    """A compose stack's services in Docker, from the workspace's compose.yaml, every image by its pinned digest: down
+    with their volumes, then up and healthy, so each chapter starts from fresh services."""
+    if stack_pins.lab(book.manifest)["stack"] != "compose":
+        return []
+    compose = 'docker compose --project-name "$project" --file "$work/compose.yaml"'
+    return [
+        f"project={q(_cluster(book))}",
+        "start_services() {",
+        "  command -v docker >/dev/null 2>&1 || fail \"The book's services run in Docker: install Docker, or Podman with its Docker socket, then run this again.\"",
+        "  docker info >/dev/null 2>&1 || fail \"Docker isn't running: start it, then run this again.\"",
+        "  say \"Starting the book's services in Docker\"",
+        f"  {compose} down --volumes >/dev/null 2>&1 || true",
+        f"  {compose} up --detach --wait >/dev/null || fail \"The book's services didn't come up: run {compose.replace(chr(34), '')} logs to see why.\"",
+        "}",
+        "",
+    ]
+
+
 def _workspace() -> list[str]:
     return [
         "fresh_workspace() {",
@@ -164,13 +198,13 @@ def _runner() -> list[str]:
     return [
         "run_file() {  # a step's file, run with bash in the workspace, and the exit code it should end with",
         "  say \"  $1\"",
-        "  if (cd \"$work\" && " + _step_env() + " bash \"$book_dir/examples/$1.sh\") > \"$lab_home/last-step.log\" 2>&1",
+        "  if (cd \"$work\" && " + _step_env() + " \"$bash_bin\" \"$book_dir/examples/$1.sh\") > \"$lab_home/last-step.log\" 2>&1",
         "  then code=0; else code=$?; fi",
         "  [ \"$code\" -eq \"$2\" ] || { cat \"$lab_home/last-step.log\" >&2; fail \"Step $1 ended with exit code $code, not $2.\"; }",
         "}",
         "wait_for() {  # seconds, then a command polled until it exits 0",
         "  end=$(( $(date +%s) + $1 ))",
-        "  until (cd \"$work\" && " + _step_env() + " bash -c \"$2\") >/dev/null 2>&1; do",
+        "  until (cd \"$work\" && " + _step_env() + " \"$bash_bin\" -c \"$2\") >/dev/null 2>&1; do",
         "    [ \"$(date +%s)\" -lt \"$end\" ] || fail \"Waited $1 s for: $2\"",
         "    sleep 1    # this script's own poll; a book's steps never sleep",
         "  done",
@@ -182,7 +216,7 @@ def _runner() -> list[str]:
 def chapter_sh(book, pinned) -> str:
     out = _prelude(book, "A fresh start for one chapter: the workspace (and the cluster) made again, then the steps "
                          "that bring it to the chapter's start.")
-    out += _workspace() + _tools(pinned) + _cluster_functions(book, pinned) + _runner()
+    out += _workspace() + _tools(pinned) + _cluster_functions(book, pinned) + _services_functions(book) + _bash() + _runner()
     used = []
     for c in book.chapters:
         used += [sid for sid in c.setup if sid not in used]
@@ -203,6 +237,8 @@ def chapter_sh(book, pinned) -> str:
             "\" ;;", "esac", "fresh_workspace"]
     if pinned is not None and "k3s" in pinned.tools:
         out += ["start_cluster", "export KUBECONFIG=\"$lab_home/kubeconfig\""]
+    if stack_pins.lab(book.manifest)["stack"] == "compose":
+        out += ["start_services"]
     out += ["[ -z \"$setup\" ] || say \"Bringing the workspace to the start of $1:\"",
             "for id in $setup; do",
             "  \"step_$(printf '%s' \"$id\" | tr -c 'a-z0-9' '_')\"",
@@ -213,14 +249,18 @@ def chapter_sh(book, pinned) -> str:
 
 
 def start_sh(book, pinned) -> str:
+    compose = stack_pins.lab(book.manifest)["stack"] == "compose"
     out = _prelude(book, "Starts this book's lab on your own machine: a workspace with the book's files" +
-                   (", and a k3s cluster in Docker through k3d." if pinned and "k3s" in pinned.tools else "."))
-    out += _workspace() + _tools(pinned) + _cluster_functions(book, pinned)
+                   (", and a k3s cluster in Docker through k3d." if pinned and "k3s" in pinned.tools else
+                    ", and its services in Docker." if compose else "."))
+    out += _workspace() + _tools(pinned) + _cluster_functions(book, pinned) + _services_functions(book)
     out += ["mkdir -p \"$lab_home\" \"$bin\"", "fresh_workspace"]
     if pinned is not None:
         out += [f"fetch_tool {name}" for name in ("k3d", "kubectl", "helm") if name in pinned.tools]
     if pinned is not None and "k3s" in pinned.tools:
         out += ["start_cluster"]
+    if compose:
+        out += ["start_services"]
     out += ["write_env",
             "say \"Ready. The workspace is $work.\"",
             "say \"In your terminal: . $lab_home/env.sh\"",
@@ -229,7 +269,7 @@ def start_sh(book, pinned) -> str:
 
 
 def check_sh(book) -> str:
-    out = _prelude(book, "Checks your work: each check, or every check of a chapter, says Passed or Not yet.")
+    out = _prelude(book, "Checks your work: each check, or every check of a chapter, says Passed or Not yet.") + _bash()
     checks = [(c.chapter_id, e.example_id) for c in book.chapters for e in c.step_embeds if e.kind == "check"]
     out += ["check_info() {", "  case \"$1\" in"]
     for _, cid in checks:
@@ -250,7 +290,7 @@ def check_sh(book) -> str:
             "  for id in $ids; do",
             "    check_info \"$id\" || fail \"There's no check $id.\"",
             "    if (cd \"$here\" && " + _step_env() +
-            " bash \"$book_dir/examples/$id.sh\") > \"$lab_home/last-check.log\" 2>&1",
+            " \"$bash_bin\" \"$book_dir/examples/$id.sh\") > \"$lab_home/last-check.log\" 2>&1",
             "    then code=0; else code=$?; fi",
             "    if [ \"$code\" -eq \"$expect\" ]; then say \"Passed: $id\"",
             "    else say \"Not yet: $id.${hint:+ $hint}\"; status=1; fi",
@@ -261,8 +301,15 @@ def check_sh(book) -> str:
 
 
 def stop_sh(book, pinned) -> str:
-    out = _prelude(book, "Stops this book's lab: the cluster is deleted, and your files stay in the workspace.")
-    if pinned is not None and "k3s" in pinned.tools:
+    compose = stack_pins.lab(book.manifest)["stack"] == "compose"
+    out = _prelude(book, "Stops this book's lab: " + ("its services and their data are deleted" if compose else
+                                                       "the cluster is deleted") + ", and your files stay in the workspace.")
+    if compose:
+        out += [f"project={q(_cluster(book))}",
+                "command -v docker >/dev/null 2>&1 && docker compose --project-name \"$project\" --file \"$work/compose.yaml\" "
+                "down --volumes >/dev/null 2>&1 || true",
+                "say \"Stopped: the services and their data are deleted.\""]
+    elif pinned is not None and "k3s" in pinned.tools:
         out += [f"cluster={q(_cluster(book))}",
                 "[ -x \"$bin/k3d\" ] && \"$bin/k3d\" cluster delete \"$cluster\" >/dev/null 2>&1 || true",
                 "rm -f \"$lab_home/kubeconfig\"",
@@ -281,8 +328,6 @@ def scripts(book) -> dict[str, str]:
     pinned = stack_pins.read_pinned(book.root)
     if which != "none" and pinned is None:
         raise LabError(f"a {which} stack's local lab needs its pins: run re-check stack --pin first")
-    if which == "compose":
-        raise LabError("a compose stack's local lab isn't generated yet")
     return {"lab/start.sh": start_sh(book, pinned), "lab/chapter.sh": chapter_sh(book, pinned),
             "lab/check.sh": check_sh(book), "lab/stop.sh": stop_sh(book, pinned)}
 

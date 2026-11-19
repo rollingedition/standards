@@ -30,9 +30,10 @@ from pathlib import Path
 from markdown_it.token import Token
 
 from . import data_path, style
-from .bookfmt import BINDING, SECTION_LEVELS, Book, Chapter, _embed_id, _strip_heading_id, new_markdown
+from .bookfmt import BINDING, SECTION_LEVELS, Book, Chapter, _embed_id, _step_ref, _strip_heading_id, new_markdown
 
-KINDS = ("opening", "heading", "prose", "item", "working-rule", "quote", "example", "block", "table", "ending", "credits")
+KINDS = ("opening", "heading", "prose", "item", "working-rule", "quote", "example", "block", "table", "ending", "credits",
+         "step", "check", "file")
 
 # Private-use characters mark spans while a Line is built, and never reach its text: a value a binding filled in
 # (a count, never a year); a lexicon's reading of inline code (never read through the lexicon again); a number that
@@ -642,6 +643,19 @@ class _ChapterScript:
             text = _fill(templates["example"], name=name, description=self.described("example", say, f"[examples.{eid}]"))
         self.add("example", text, self.where(tok))
 
+    def step(self, kind: str, sid: str, tok: Token) -> None:
+        """A terminal book's step, check or file: its name and the description the chapter's narration gives it, by the
+        template for its kind, never its link, command or output."""
+        name = sid.replace("-", " ")
+        say = self.own["examples"].get(sid)
+        self.elements.append(_Element(kind, self.unit, self.where(tok), sid, entry={"say": say} if say else None))
+        templates = self.speaker.templates
+        if say is None:
+            text = _fill(templates["fallback"][kind], name=name)
+        else:
+            text = _fill(templates[kind], name=name, description=self.described(kind, say, f"[examples.{sid}]"))
+        self.add(kind, text, self.where(tok))
+
     def block(self, tok: Token) -> None:
         lang = (tok.info or "").strip().split(" ")[0] if tok.type == "fence" else ""
         first_line = tok.map[0] + (1 if tok.type == "fence" else 0)
@@ -694,6 +708,12 @@ class _ChapterScript:
                     self.flush_item()
                     self.example(eid, tok)
                     after_example = True
+                    i += 3
+                    continue
+                ref = _step_ref(tokens, i) if self.book.steps or self.book.files else None
+                if ref is not None:
+                    self.flush_item()
+                    self.step(ref[0], ref[1], tok)
                     i += 3
                     continue
                 inline = tokens[i + 1]
@@ -868,18 +888,20 @@ def check_narration(book: Book, *, narration: Narration | None = None, rules: di
         for e in built.elements:
             if e.entry:
                 continue
-            if e.kind == "example":
-                warnings.append(f"{c.file}:{e.line}: example {e.ref!r} has no description; add [examples.{e.ref}] say = \"…\" to {rel}")
+            if e.kind in ("example", "step", "check"):
+                warnings.append(f"{c.file}:{e.line}: {e.kind} {e.ref!r} has no description; add [examples.{e.ref}] say = \"…\" to {rel}")
+            elif e.kind == "file":
+                continue                     # read by its name: a file the steps read needs no description
             else:
                 what = f"a {e.lang} block" if e.kind == "block" and e.lang else "a block" if e.kind == "block" else "a table"
                 warnings.append(f"{c.file}:{e.line}: {what} in {e.unit!r} has no description; add [[{e.kind}s]] "
                                 f"section = \"{e.unit}\", starts = {_quoted(_prefix(e.ref))}, say = \"…\" to {rel}")
 
         own = narration.chapters.get(c.chapter_id, {"examples": {}, "blocks": [], "tables": []})
-        embedded = {e.ref for e in built.elements if e.kind == "example"}
+        embedded = {e.ref for e in built.elements if e.kind in ("example", "step", "check", "file")}
         for eid in own["examples"]:
             if eid not in embedded:
-                elsewhere = book.examples.get(eid)
+                elsewhere = book.examples.get(eid) or book.steps.get(eid) or book.files.get(eid)
                 hint = (f"; it's embedded in {elsewhere.chapter_id!r}" if elsewhere and elsewhere.chapter_id
                         else "" if elsewhere else "; there's no such example")
                 warnings.append(f"{rel}: [examples.{eid}]: this chapter doesn't embed {eid!r}{hint}")

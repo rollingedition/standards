@@ -24,13 +24,15 @@ start, and a step whose output differs between runs after its masks fails: what'
 time. `record` writes the outputs only then.
 
 Backends make the fresh start. `local` runs plain shell steps (a book whose [lab] stack is none) in a scratch folder
-on this machine, with the network blocked by `unshare -rn` as the examples' venv is. A stack's backend, such as k3s,
+on this machine, with the network blocked by `unshare -rn` as the examples' venv is. `compose` brings a compose stack's
+services up beside the steps from the workspace's compose.yaml, every image pinned and none pulled. A stack's backend, such as k3s,
 gives the same interface: `start` a fresh workspace for a chapter, `stop` it, and the environment and wrapper every
 process of the chapter runs with.
 """
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 import re
@@ -47,7 +49,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import examples, stack, steps as step_format
+from . import data_path, examples, stack, steps as step_format
 from .bookfmt import Book
 
 MARKER = re.compile(rb"\x1b\]133;([ABCD])(?:;([^\x07\x1b]*))?(?:\x07|\x1b\\)|\x1b\]7;([^\x07\x1b]*)(?:\x07|\x1b\\)")
@@ -136,6 +138,9 @@ class Backend:
     def describe(self) -> dict:
         return {"backend": self.name}
 
+    def close(self) -> None:
+        """Once every chapter has run: anything the backend set up on the machine for them, taken down."""
+
 
 def book_files(book: Book, into: Path) -> None:
     """The book's examples/ folder as a reader's workspace holds it: its files and data, without the steps' own files
@@ -176,18 +181,76 @@ class LocalBackend(Backend):
         return {"backend": self.name, "network": "blocked" if self.block_network else "open"}
 
 
+class ComposeBackend(Backend):
+    """A compose stack's services beside the steps (TL13): each chapter in a new scratch folder with the book's files,
+    its services brought up from the workspace's compose.yaml, every image the stack pins and none pulled from a
+    registry (`--pull never`), and taken down with their volumes after it. The steps run on this machine, with the
+    services on loopback; Docker (or a compose-compatible engine) runs them. The Lab's VM and CI's run it the same way
+    (services/labs/terminal/vmstack.py)."""
+    name = "compose"
+    stacks = ("compose",)
+
+    def __init__(self, docker: str = "docker", run=subprocess.run, wait_seconds: int = 300):
+        self.docker, self.run, self.wait_seconds = docker, run, wait_seconds
+        if not shutil.which(docker) and run is subprocess.run:
+            raise CommandsError(f"a compose stack's services run in Docker: install it, so `{docker} compose` runs")
+
+    def compose(self, ws: "Workspace", *args: str, seconds: float = 120) -> subprocess.CompletedProcess:
+        return self.run([self.docker, "compose", "--project-name", ws.extra["project"], "--file",
+                         str(ws.cwd / "compose.yaml"), *args], cwd=ws.cwd, capture_output=True, text=True,
+                        timeout=seconds)
+
+    def start(self, book: Book, chapter_id: str) -> Workspace:
+        root = Path(tempfile.mkdtemp(prefix=f"re-commands-{chapter_id}-"))
+        home, work = root / "home", root / "work"
+        home.mkdir()
+        book_files(book, work)
+        ws = Workspace(root, home, work, {"HOME": str(home)}, extra={"project": f"re-{book.slug}-{chapter_id}"[:60]})
+        got = self.compose(ws, "up", "--detach", "--wait", "--pull", "never",
+                           f"--wait-timeout={self.wait_seconds}", seconds=self.wait_seconds + 30)
+        if got.returncode:
+            self.stop(ws)
+            raise CommandsError(f"the chapter's services didn't come up: {(got.stderr or got.stdout).strip()[-600:]}")
+        return ws
+
+    def stop(self, ws: Workspace) -> None:
+        try:
+            self.compose(ws, "down", "--volumes", "--remove-orphans", "--timeout", "10", seconds=120)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+        shutil.rmtree(ws.root, ignore_errors=True)
+
+    def describe(self) -> dict:
+        return {"backend": self.name}
+
+
+def _k3s(book: Book, block_network: bool) -> Backend:
+    from .k3s import K3sBackend                      # imported here: k3s.py builds on this module
+    return K3sBackend(book, block_network=block_network)
+
+
+# Each backend by name, with the stacks it runs: `local` plain shell steps (a stack of none), `k3s` a cluster from the
+# stack's pins (k3s.py), `compose` a compose stack's services in Docker (ComposeBackend).
+BACKENDS: dict[str, tuple[tuple[str, ...], Callable[[Book, bool], Backend]]] = {
+    "local": (LocalBackend.stacks, lambda book, block: LocalBackend(block_network=block)),
+    "k3s": (("k3s",), _k3s),
+    "compose": (ComposeBackend.stacks, lambda book, block: ComposeBackend(
+        wait_seconds=int(stack.settings()["stack"].get("compose_wait_seconds", 300)))),
+}
+
+
 def backend_for(book: Book, name: str | None = None, block_network: bool = True) -> Backend:
-    """The backend for a book's stack, or the one named. Only plain shell runs here yet: a stack's backend, such as
-    k3s, plugs in with the same interface."""
+    """The backend for a book's stack, or the one named, which must run that stack."""
     wanted = stack.lab(book.manifest)["stack"]
-    name = name or ("local" if wanted == "none" else wanted)
-    if name == "local":
-        if wanted != "none":
-            raise CommandsError(f"the local backend runs plain shell steps; this book's stack is {wanted}, so its steps "
-                                f"need the {wanted} backend")
-        return LocalBackend(block_network=block_network)
-    raise CommandsError(f"this book's stack is {wanted}, so its steps need the {name} backend, which isn't built yet: "
-                        "the local backend runs plain shell steps, a stack of none")
+    name = name or next((n for n, (stacks, _) in BACKENDS.items() if wanted in stacks), wanted)
+    if name not in BACKENDS:
+        raise CommandsError(f"this book's stack is {wanted}, so its steps need the {name} backend, which isn't built yet: "
+                            f"the backends are {', '.join(f'{n} (a stack of {s[0]})' for n, (s, _) in BACKENDS.items())}")
+    stacks, make = BACKENDS[name]
+    if wanted not in stacks:
+        raise CommandsError(f"the {name} backend runs a stack of {', '.join(stacks)}; this book's stack is {wanted}, so its "
+                            f"steps need the {next((n for n, (s, _) in BACKENDS.items() if wanted in s), wanted)} backend")
+    return make(book, block_network)
 
 
 # ---------------------------------------------------------------- a terminal tab
@@ -662,11 +725,138 @@ def output_problems(book: Book) -> list[str]:
             for s in book.steps.values() if s.directives.compare != "none" and s.expected is None]
 
 
-def results_json(runs: list[ChapterRun], outcome: str, backend: dict) -> dict:
+def results_json(runs: list[ChapterRun], outcome: str, backend: dict, book: Book | None = None,
+                 at: str | None = None, selection: Selection | None = None, recorded: bool = False) -> dict:
+    """A run's report: its outcome, each chapter's results, and, given the book, its record (record()), which a later
+    run's selection compares with (`re-check commands --affected --recorded REPORT`)."""
     ran = [r for run in runs for r in run.results if r.phase == "chapter"]
-    return {"outcome": outcome, "backend": backend, "passing": sum(r.ok for r in ran), "total": len(ran),
-            "chapters": [run.as_json() for run in runs]}
+    out = {"outcome": outcome, "backend": backend, "passing": sum(r.ok for r in ran), "total": len(ran),
+           "chapters": [run.as_json() for run in runs]}
+    if selection is not None:
+        out["selection"] = {"everything": selection.everything, "why": selection.why, "chapters": selection.chapters,
+                            "floor": selection.floor, "total": selection.total}
+    if book is not None:
+        out["record"] = record(book, runs, at, recorded)
+    return out
 
 
 def write_json(path: Path, data: dict) -> None:
     Path(path).write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
+
+
+# ---------------------------------------------------------------- which chapters run: the record and the selection
+
+
+RUNNER_FILES = ("commands.py", "steps.py", "k3s.py")
+
+
+def runner_key() -> str:
+    """A hash of the code that runs the steps and the settings every run starts with: a record that keeps it says which
+    ran, so a later selection can tell when it changed."""
+    h = hashlib.sha256()
+    for path in [Path(__file__).with_name(n) for n in RUNNER_FILES] + [data_path("commands.toml")]:
+        h.update(path.name.encode() + b"\0" + path.read_bytes() + b"\0")
+    return h.hexdigest()[:16]
+
+
+def stack_digest(book: Book) -> str:
+    """The stack's pins' digest (stack.Pinned.digest), or "" for a book with none."""
+    try:
+        pinned = stack.read_pinned(book.root)
+    except (stack.StackError, OSError):
+        return "unreadable"
+    return pinned.digest() if pinned else ""
+
+
+def record(book: Book, runs: list[ChapterRun] | None = None, at: str | None = None, recorded: bool = False) -> dict:
+    """What a selection compares with: the stack's digest, the runner's key, and each chapter's inputs_sha256 (steps.py),
+    with, for a chapter that ran here, whether it passed and when. `recorded`: the run wrote its outputs, so an output
+    other than the one recorded before is the new one, not a failure."""
+    views = step_format.steps_json(book)
+    ran = {r.chapter_id: r for r in runs or []}
+    chapters = {}
+    for cid, view in views.items():
+        entry = {"inputs_sha256": view["inputs_sha256"]}
+        if cid in ran:
+            entry["passed"] = not ran[cid].problems and (recorded or not ran[cid].differences)
+            if at:
+                entry["verified_at"] = at
+        chapters[cid] = entry
+    return {"stack_digest": stack_digest(book), "runner": runner_key(), "chapters": chapters}
+
+
+@dataclass
+class Selection:
+    """The chapters a run takes, each with why, or every chapter, with why."""
+    chapters: dict[str, list[str]]
+    everything: bool
+    total: int
+    why: str = ""
+    floor: list[str] = field(default_factory=list)     # chapters that run only because their last run is too old
+
+    @property
+    def ids(self) -> list[str]:
+        return list(self.chapters)
+
+
+def _parse_time(text: str):
+    from datetime import datetime
+    return datetime.fromisoformat(str(text).replace("Z", "+00:00"))
+
+
+def select_chapters(book: Book, previous: dict | None, changed: list[str] | None = None, now=None,
+           floor_days: float | None = None) -> Selection:
+    """The chapters a change could affect, against `previous`: the base's record (record() of the pull request's base)
+    or the last run's (a report's `record`, or an edition's).
+
+    Every chapter runs when there's nothing to compare with, when the code that runs the steps changed, when the stack's
+    pins changed, or when a file under examples/ changed that's neither a step's own nor a file a chapter embeds, since
+    any step may read it. Otherwise a chapter runs when its steps, checks, setup or embedded files changed
+    (inputs_sha256), when one of its steps' recorded outputs changed, when it's new, when its last run didn't pass, or,
+    with `floor_days` and `now`, when its last passing run is older than that: the freshness floor."""
+    views = step_format.steps_json(book)
+    total = len(views)
+
+    def everything(why: str) -> Selection:
+        return Selection({cid: [why] for cid in views}, True, total, why)
+
+    if previous is None:
+        return everything("there's no earlier run to compare with")
+    if previous.get("runner") and previous["runner"] != runner_key():
+        return everything("the code that runs the steps changed since the run it's compared with")
+    if previous.get("stack_digest", "") != stack_digest(book):
+        return everything(f"the stack's pins changed ({stack.STACK})")
+    embedded = {f.file for f in book.files.values()}
+    own = {s.file for s in book.steps.values()} | {f"examples/{sid}.out" for sid in book.steps}
+    for path in changed or []:
+        if path.startswith("examples/") and path not in own and path not in embedded \
+                and path not in (stack.STACK, stack.STACK_IN):
+            return everything(f"{path} changed, and any step may read it")
+    outs = {f"examples/{sid}.out": s.chapter_id for sid, s in book.steps.items()}
+    before = previous.get("chapters") or {}
+    chosen: dict[str, list[str]] = {}
+    for cid, view in views.items():
+        why = []
+        last = before.get(cid)
+        if last is None:
+            why.append("it's new, or had no steps before")
+        else:
+            if last.get("inputs_sha256") != view["inputs_sha256"]:
+                why.append("its steps, checks, setup or files changed")
+            if last.get("passed") is False:
+                why.append("its last run didn't pass")
+        hit = sorted(p for p in changed or [] if outs.get(p) == cid)
+        if hit:
+            why.append(f"a recorded output changed ({', '.join(hit)})")
+        if why:
+            chosen[cid] = why
+    floor = []
+    if floor_days is not None and now is not None:
+        from datetime import timedelta
+        cutoff = now - timedelta(days=float(floor_days))
+        for cid in views:
+            at = (before.get(cid) or {}).get("verified_at")
+            if cid not in chosen and at and _parse_time(at) < cutoff:
+                chosen[cid] = [f"its last passing run, on {str(at)[:10]}, is more than {float(floor_days):g} days old"]
+                floor.append(cid)
+    return Selection({cid: chosen[cid] for cid in views if cid in chosen}, False, total, floor=floor)

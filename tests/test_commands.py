@@ -210,7 +210,7 @@ def test_a_step_sees_only_the_runners_environment(tmp_path, monkeypatch):
 
 
 def test_recording_refuses_what_prints_differently_from_run_to_run(tmp_path, capsys):
-    book = one_chapter(tmp_path, {"random": "echo $RANDOM$RANDOM\n"})
+    book = one_chapter(tmp_path, {"random": "cat /proc/sys/kernel/random/uuid\n"})
     assert cli.main(["commands", "--book", str(book.root), "--record"]) == 1
     assert "step random prints differently from run to run" in capsys.readouterr().err
     assert not (book.root / "examples" / "random.out").exists()
@@ -220,7 +220,7 @@ def test_a_book_with_a_stack_needs_its_backend(tmp_path, capsys):
     root = sampler(tmp_path)
     (root / "book.toml").write_text((root / "book.toml").read_text().replace('stack = "none"', 'stack = "k3s"'))
     assert cli.main(["commands", "--book", str(root)]) == 1
-    assert "its steps need the k3s backend" in capsys.readouterr().err
+    assert "need k3s pinned in examples/stack.toml" in capsys.readouterr().err
     with pytest.raises(commands.CommandsError):
         commands.backend_for(bookfmt.load_book(root))
 

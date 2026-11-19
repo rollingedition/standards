@@ -1,0 +1,107 @@
+{
+  "description": "What a terminal book's renovate.json adds to every book's (re-check readme, from the standards' data/renovate-stack.json): Renovate's managers for the stack the book's steps run on. The versions in examples/stack.in.toml, and the images its manifests name, by their tags. A pull request that moves one has its examples/stack.toml and lab scripts generated again by the book's agent, re-check stack --pin and re-check lab --write, before its checks can pass.",
+  "enabledManagers": [
+    "custom.regex",
+    "kubernetes"
+  ],
+  "includePaths": [
+    "examples/stack.in.toml",
+    "examples/**/*.yaml",
+    "examples/**/*.yml"
+  ],
+  "kubernetes": {
+    "managerFilePatterns": [
+      "/^examples/.+\\.ya?ml$/"
+    ]
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "k3s, the cluster a terminal book's steps run on: its releases, such as v1.31.4+k3s1",
+      "managerFilePatterns": [
+        "/^examples/stack\\.in\\.toml$/"
+      ],
+      "matchStrings": [
+        "(?m)^k3s\\s*=\\s*\"(?<currentValue>[^\"]+)\""
+      ],
+      "depNameTemplate": "k3s",
+      "packageNameTemplate": "k3s-io/k3s",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)\\+k3s(?<build>\\d+)$"
+    },
+    {
+      "customType": "regex",
+      "description": "kubectl, the cluster's client, at a Kubernetes release",
+      "managerFilePatterns": [
+        "/^examples/stack\\.in\\.toml$/"
+      ],
+      "matchStrings": [
+        "(?m)^kubectl\\s*=\\s*\"(?<currentValue>[^\"]+)\""
+      ],
+      "depNameTemplate": "kubectl",
+      "packageNameTemplate": "kubernetes/kubernetes",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
+      "description": "helm, at one of its releases",
+      "managerFilePatterns": [
+        "/^examples/stack\\.in\\.toml$/"
+      ],
+      "matchStrings": [
+        "(?m)^helm\\s*=\\s*\"(?<currentValue>[^\"]+)\""
+      ],
+      "depNameTemplate": "helm",
+      "packageNameTemplate": "helm/helm",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
+      "description": "k3d, which runs the cluster on readers' own machines, at one of its releases",
+      "managerFilePatterns": [
+        "/^examples/stack\\.in\\.toml$/"
+      ],
+      "matchStrings": [
+        "(?m)^k3d\\s*=\\s*\"(?<currentValue>[^\"]+)\""
+      ],
+      "depNameTemplate": "k3d",
+      "packageNameTemplate": "k3d-io/k3d",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
+      "description": "Each chart in examples/stack.in.toml, from its repository: [charts.NAME] with repo, then version",
+      "managerFilePatterns": [
+        "/^examples/stack\\.in\\.toml$/"
+      ],
+      "matchStrings": [
+        "\\[charts\\.(?<depName>[A-Za-z0-9._-]+)\\][^\\[]*?\\brepo\\s*=\\s*\"(?<registryUrl>[^\"]+)\"[^\\[]*?\\bversion\\s*=\\s*\"(?<currentValue>[^\"]+)\""
+      ],
+      "datasourceTemplate": "helm"
+    },
+    {
+      "customType": "regex",
+      "description": "Each image in examples/stack.in.toml, by its tag: [images.\"REPOSITORY:TAG\"]",
+      "managerFilePatterns": [
+        "/^examples/stack\\.in\\.toml$/"
+      ],
+      "matchStrings": [
+        "\\[images\\.\"(?<depName>[^\"]+?):(?<currentValue>[A-Za-z0-9_][A-Za-z0-9_.+-]*)\"\\]"
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "k3s and kubectl move together, so the cluster and its client stay one version apart at most",
+      "matchDepNames": [
+        "k3s",
+        "kubectl"
+      ],
+      "groupName": "Kubernetes"
+    }
+  ]
+}

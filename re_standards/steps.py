@@ -22,6 +22,7 @@ did. This module is the format; commands.py runs it.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import re
 import tomllib
@@ -236,8 +237,59 @@ def parse_step(text: str, step_id: str, rel: str, expected: str | None = None) -
     for w in directives.wait:
         if sleep.search(w):
             problems.append(f"#| wait: {w}: a wait polls; it never sleeps")
+    problems += rule_problems(command, directives, len(found) + 1)
+    for w in directives.wait:
+        problems += [f"#| wait: {w}: {p.split(': ', 1)[1]}" for p in rule_problems(w + "\n", Directives(), 0)
+                     if "W-70" not in p]
     step = Step(step_id, rel, source, command, sha256_text(source), directives, expected)
     return step, [f"{rel}: {p}" for p in problems]
+
+
+def _local(host: str) -> bool:
+    """Whether a URL's host is this machine or the cluster: W-74 allows nothing else."""
+    rules = settings()["rules"]
+    host = host.lower().strip("[]")
+    if host in [h.strip("[]") for h in rules["local_hosts"]] or host.endswith(tuple(rules["local_suffixes"])):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return ip.is_loopback or any(ip in ipaddress.ip_network(n) for n in rules["local_networks"])
+
+
+def rule_problems(command: str, d: Directives, first_line: int) -> list[str]:
+    """What a step's command breaks of the writing standards' section 15, line by line (data/commands.toml [rules]):
+    W-70, what prints differently every run without its mask; W-74, a download or an address beyond this machine and
+    the cluster; W-76, what bash 3.2 can't run."""
+    rules = settings()["rules"]
+    random, clock, job = (re.compile(rules[k]) for k in ("random", "clock", "job"))
+    fetches, url = re.compile(rules["fetches"]), re.compile(rules["url"])
+    bash32 = [(what, re.compile(rx)) for what, rx in rules["bash32"].items()]
+    out = []
+    for n, line in enumerate(command.split("\n"), first_line):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        where = f"line {n}" if first_line else "it"
+        if random.search(line):
+            out.append(f"{where}: W-70: $RANDOM, uuidgen and /dev/urandom print something new every run: name it yourself")
+        compared = d.compare != "none" and not d.background
+        if clock.search(line) and compared and "time" not in d.mask:
+            out.append(f"{where}: W-70: date prints the time, which changes every run: add #| mask: time, or leave it out")
+        if job.search(line) and compared and "job" not in d.mask:
+            out.append(f"{where}: W-70: a job started with & prints its process ID, which changes every run: add "
+                       "#| mask: job, or run it in a tab of its own with #| tab and #| background")
+        if m := fetches.search(line):
+            out.append(f"{where}: W-74: {m.group(0)} downloads from beyond the cluster: pin what it fetches in "
+                       "examples/stack.in.toml, or ship it in examples/")
+        for m in url.finditer(line):
+            if not _local(m.group(1)):
+                out.append(f"{where}: W-74: {m.group(1)} is beyond this machine and the cluster, which nothing in a Lab "
+                           "can reach")
+        for what, rx in bash32:
+            if rx.search(line):
+                out.append(f"{where}: W-76: bash 3.2, which readers' Macs run the local lab with, has no {what}")
+    return out
 
 
 def load_steps(root: Path, valid_id) -> tuple[dict[str, Step], list[str]]:

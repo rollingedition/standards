@@ -1,0 +1,9 @@
+# The versions this book's steps run on. `re-check stack --pin` generates stack.toml from this file.
+[tools]
+k3s = "v1.31.4+k3s1"
+kubectl = "v1.31.4"
+helm = "v3.16.4"
+k3d = "v5.7.5"
+
+[images."docker.io/library/nginx:1.27.3"]
+licence = "BSD-2-Clause"

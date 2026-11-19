@@ -15,12 +15,20 @@ disclosure = "Read by an AI voice, word for word from this edition's text. Code,
 ending = "End of chapter {number}."
 heading = "{text}."                      # a section heading, read as a sentence
 example = "Example: {name}. {description}"
+# A terminal book's step, check and file (steps.py), read by their names and the descriptions narration/{chapter}.toml
+# gives them as [examples.ID], never their link, their command or their output
+step = "Step: {name}. {description}"
+check = "Check your work: {name}. {description}"
+file = "File: {name}. {description}"
 ordered_item = "{number}. {text}"        # an item of a numbered list; a bulleted one is read as it is
 quote = "{text}"
 link_url = "a link on the page"          # a link whose text is its address
 
 [templates.fallback]                     # what's read where the book gives no description
 example = "Example: {name}. Its code and output are on the page."
+step = "Step: {name}. Its command and output are on the page."
+check = "Check your work: {name}. Its command is on the page."
+file = "File: {name}. It's on the page."
 table = "A table is on the page."
 
 [templates.fallback.block]               # a fenced block that isn't an example, by its language

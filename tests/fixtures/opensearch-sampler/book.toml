@@ -1,0 +1,14 @@
+# The services pilot: a two-chapter sampler of steps against one
+# OpenSearch node in compose, for the tests of a compose stack's pins, the compose file's rules, the runner's compose
+# backend and the local scripts. OpenSearch, not Elasticsearch: the Elastic License refuses hosted use.
+slug = "opensearch-sampler"
+title = "An OpenSearch Sampler"
+summary = "A search service beside the steps: start one OpenSearch node, index a few products and search them."
+status = "draft"
+level = "foundations"
+skills = ["search-relevance"]
+line = "main"
+
+[lab]
+kind = "terminal"
+stack = "compose"

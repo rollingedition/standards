@@ -1,0 +1,4 @@
+# The images the steps run beside, by tag, with their licences: `re-check stack --pin` writes their digests in
+# stack.toml, and compose.yaml names each by its digest.
+[images."opensearchproject/opensearch:2.19.1"]
+licence = "Apache-2.0"

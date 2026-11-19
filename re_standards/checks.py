@@ -54,6 +54,7 @@ def narration_only(paths: list[str]) -> bool:
 
 
 SKILL_FILE = "skill.md"           # the procedures of the book's agent skill, beside book.toml, never on the page
+VOICE_FILE = "voice.toml"         # an authored book's voice, beside book.toml, which the drafting tools read; never on the page
 
 
 def generated_only(paths: list[str]) -> bool:
@@ -65,13 +66,13 @@ def generated_only(paths: list[str]) -> bool:
 
 def rides_along(paths: list[str]) -> bool:
     """Whether a change touches nothing but files that ride with the next edition: the narration files, the agent
-    skill's procedures and the generated repository files (generated_only). None is on the page, so such a change
+    skill's procedures, an authored book's voice.toml and the generated repository files (generated_only). None is on the page, so such a change
     needs no kind label and cuts no edition of its own. (Adding skill.md where the last edition had none does cut one:
     the release checks that, since it knows the edition.)"""
     if not paths:
         return False
     names = generated_names()
-    return all(p.startswith(NARRATION_DIR) or p == SKILL_FILE or p in names for p in paths)
+    return all(p.startswith(NARRATION_DIR) or p in (SKILL_FILE, VOICE_FILE) or p in names for p in paths)
 
 
 def riding_words(paths: list[str]) -> str:
@@ -79,6 +80,7 @@ def riding_words(paths: list[str]) -> str:
     names = generated_names()
     parts = [words for words, hit in (("narration", any(p.startswith(NARRATION_DIR) for p in paths)),
                                       ("the agent skill's procedures", SKILL_FILE in paths),
+                                      ("the author's voice", VOICE_FILE in paths),
                                       ("the generated front page and workflows", any(p in names for p in paths))) if hit]
     return " and ".join(parts) or "nothing"
 

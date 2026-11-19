@@ -1,0 +1,104 @@
+# A terminal book's steps and checks, on every pull request and every week: its stack's pins and licences, its local
+# lab's scripts, and each chapter on a fresh cluster of its own (k3s) or a plain shell, compared with its recorded output.
+# A book whose book.toml says [lab] kind = "terminal" calls this reusable workflow from its checks.yml. It runs with
+# read-only permissions, no secrets and no deploy rights, on GitHub's own ubuntu-24.04, and only when the book has steps
+# (examples/*.sh).
+#
+# `scope` says which chapters run: `all`, or `affected`, only those a change since the pull request's base could
+# affect, each with why (re-check commands --affected). Every chapter runs when the stack's pins change. The stack's
+# files and images are cached by the pins' digest, so a run whose pins didn't change fetches nothing.
+#
+# `record`, asked for by hand only, records every output instead, each chapter twice on a fresh cluster, and keeps the
+# outputs as the run's artifact, for the book's agents or a maintainer to commit.
+name: Book commands
+
+on:
+  workflow_call:
+    inputs:
+      standards-ref:
+        description: The standards version whose checks run
+        type: string
+        default: v1
+      scope:
+        description: Which chapters run, all or affected (only those the pull request's change could affect)
+        type: string
+        default: all
+      record:
+        description: Record every step's output instead of comparing it, and keep the outputs as the run's artifact
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  commands:
+    name: commands
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      # With its history, so the affected chapters can be told from the base commit.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: No steps yet
+        if: ${{ hashFiles('examples/*.sh') == '' }}
+        run: "echo 'ok  no steps or checks in examples/*.sh, so nothing runs'"
+      - uses: actions/checkout@v4
+        if: ${{ hashFiles('examples/*.sh') != '' }}
+        with:
+          repository: rollingedition/standards
+          ref: ${{ inputs.standards-ref }}
+          path: .standards
+      - uses: actions/setup-python@v5
+        if: ${{ hashFiles('examples/*.sh') != '' }}
+        with:
+          python-version: "3.13"
+      - name: Install the checks
+        if: ${{ hashFiles('examples/*.sh') != '' && !env.RE_LOCAL }}
+        run: pip install --quiet -e ./.standards
+      - name: Check the stack's pins and licences
+        if: ${{ hashFiles('examples/*.sh') != '' }}
+        run: re-check stack --book .
+      - name: Check the local lab's scripts
+        if: ${{ hashFiles('examples/*.sh') != '' }}
+        run: re-check lab --book .
+      - name: The pins' digest, which the stack's cache is kept by
+        id: stack
+        if: ${{ hashFiles('examples/*.sh') != '' }}
+        run: echo "digest=$(re-check stack --book . --digest)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        if: ${{ hashFiles('examples/*.sh') != '' }}
+        with:
+          path: ~/.cache/re-stack
+          key: re-stack-${{ steps.stack.outputs.digest }}
+      # Each image by its digest, saved under its tag for k3s to import; kept from the cache when the pins didn't change.
+      - name: Export the stack's images
+        if: ${{ hashFiles('examples/*.sh') != '' }}
+        run: re-check stack --book . --images
+      - name: Run each chapter from a fresh start and compare its output
+        if: ${{ hashFiles('examples/*.sh') != '' }}
+        env:
+          SCOPE: ${{ inputs.scope }}
+          RECORD: ${{ inputs.record }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          report="$RUNNER_TEMP/commands-report.json"
+          if [ "$RECORD" = "true" ]; then
+            re-check commands --book . --record --report "$report"
+            exit $?
+          fi
+          case "$SCOPE" in
+            all) re-check commands --book . --report "$report" ;;
+            affected) re-check commands --book . --affected --base-ref "$BASE_SHA" --report "$report" ;;
+            *) echo "scope is all or affected, not '$SCOPE'" >&2; exit 1 ;;
+          esac
+      # The report says what ran and why, each chapter's time and peak memory; with `record`, the outputs to commit.
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() && hashFiles('examples/*.sh') != '' }}
+        with:
+          name: commands
+          path: |
+            ${{ runner.temp }}/commands-report.json
+            examples/*.out
+          if-no-files-found: ignore

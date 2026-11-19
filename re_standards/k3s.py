@@ -29,6 +29,14 @@ So every chapter starts from the same cluster, its certificates, UIDs and system
 order, or on different machines. Each chapter's peak memory, k3s and its pods together, is sampled while it runs and
 reported, so chapters can be written to the Lab's machine.
 
+**A machine image of the stack** (bake): the Lab's machines start from a disk image made once per stack, so a session
+doesn't import the stack's images at every start. The bake installs as above, starts k3s until it's Ready with every
+pinned image imported, stops it, and removes everything that makes the cluster this machine's own (node_state_script):
+the server's datastore, certificates and tokens, the agent's certificates and settings, the node's password, the
+kubelet's state. containerd's content and snapshots stay. On a machine started from that image, RE_STACK_BAKED names the
+stack it holds: nothing is installed, what's there is checked against the pins, and the first start makes the cluster's
+own certificates and datastore, then the clean data dir is kept as above.
+
 Everything that changes the machine goes through a Host. The real one runs as root through sudo. Tests give a fake, so
 nothing here needs Docker, k3s or root to be tested. The first real run is the pull request's job on GitHub's
 ubuntu-24.04, or the release's on Cloud Batch.
@@ -54,6 +62,7 @@ from .bookfmt import Book
 
 AGENT = "re-standards (k3s)"
 IMAGES_INDEX = "images.json"
+BAKED = "RE_STACK_BAKED"            # the stack digest this machine's disk image holds, imported (bake), or unset
 ARCHIVES = (".tar", ".tar.zst", ".tar.gz", ".tar.lz4", ".tar.bz2")      # what k3s imports from its images folder
 # The cgroups whose memory a chapter uses: k3s itself, under its unit, and the pods, under kubepods
 MEMORY = ("/sys/fs/cgroup/system.slice/{unit}.service/memory.current", "/sys/fs/cgroup/kubepods/memory.current",
@@ -138,6 +147,11 @@ class Host:
         except OSError:
             return None
 
+    def sha256(self, path: str) -> str | None:
+        """A file's SHA-256, or None when it isn't there: what a machine image holds, checked against the pins."""
+        p = Path(path)
+        return file_sha256(p) if p.is_file() else None
+
     def monotonic(self) -> float:
         return time.monotonic()
 
@@ -187,11 +201,13 @@ def unit_text(cfg: dict) -> str:
 def killall_script(cfg: dict) -> str:
     """k3s stopped and everything it started killed, as k3s's own k3s-killall.sh does: the unit, every container's shim
     and what it runs, the mounts under k3s's and the kubelet's folders, the pods' network namespaces and links, and the
-    iptables rules k3s and flannel wrote. The fence's own rules stay."""
+    iptables rules k3s and flannel wrote. The fence's own rules stay. A shim is told by its executable, never its command
+    line: this script runs as `sh -c` with its own text on its command line, so matching that killed the script itself
+    (GitHub's first real run, Nov 19, 2026)."""
     data = cfg["data_dir"]
     return f"""set +e
 systemctl stop {cfg['unit']} 2>/dev/null
-pids() {{ ps -e -o pid= -o args= | while read -r pid args; do case "$args" in *k3s/data/*/bin/containerd-shim*) echo "$pid" ;; esac; done; }}
+pids() {{ for d in /proc/[0-9]*; do exe=$(readlink "$d/exe" 2>/dev/null) || continue; case "$exe" in */k3s/data/*/bin/containerd-shim*) echo "${{d#/proc/}}" ;; esac; done; }}
 tree() {{ for p in "$@"; do echo "$p"; tree $(ps -e -o pid= -o ppid= | while read -r c pp; do [ "$pp" = "$p" ] && echo "$c"; done); done; }}
 victims=$(tree $(pids))
 [ -z "$victims" ] || kill -9 $victims 2>/dev/null
@@ -235,6 +251,20 @@ def snapshot_script(cfg: dict) -> str:
 def restore_script(cfg: dict) -> str:
     """The clean data dir back in place, k3s stopped: what a chapter starts from."""
     return f"set -e\n{_mirror(cfg, cfg['snapshot_dir'], cfg['data_dir'])}\n"
+
+
+def node_state_script(cfg: dict) -> str:
+    """Everything that makes a cluster this machine's own, removed once k3s has stopped, so every machine started from an
+    image of this disk makes its own (bake): all of the server's folder (its datastore, certificates, tokens and
+    credentials), all of the agent's but containerd's store (its certificates, kubeconfigs, generated settings and the
+    import folder's archives), the node's password, the kubelet's and CNI's state, the pods' logs and any clean copy.
+    containerd's content and snapshots stay: the stack's images, imported once. k3s's own unpacked binaries stay too."""
+    data = cfg["data_dir"]
+    gone = (f"{data}/server", cfg["snapshot_dir"], "/etc/rancher/node", "/var/lib/kubelet", "/var/lib/cni",
+            "/var/log/pods", "/var/log/containers")
+    return (f"set -e\nrm -rf {' '.join(shlex.quote(p) for p in gone)}\n"
+            f"find {shlex.quote(data + '/agent')} -mindepth 1 -maxdepth 1 ! -name containerd -exec rm -rf {{}} +\n"
+            f"rm -f {shlex.quote(data + '/agent/containerd/containerd.log')}\n")
 
 
 def user_script(cfg: dict) -> str:
@@ -403,6 +433,8 @@ class K3sBackend(commands.Backend):
         # the internet, such as the Lab's keyless one, is given signed URLs for them (RE_STACK_FILES, JSON)
         self.mirror: dict[str, str] = json.loads(os.environ.get("RE_STACK_FILES") or "{}")
         self.platform = step_format.settings()["stack"]["lab_platform"]
+        # The stack this machine's disk image holds already (bake), or "": a machine started from one installs nothing
+        self.baked = os.environ.get(BAKED, "")
         self.prepared = False
         self.fenced = False
         self.ready: dict[str, float] = {}             # chapter -> seconds from starting k3s to Ready
@@ -495,9 +527,36 @@ class K3sBackend(commands.Backend):
         self.host.script(fence_script(self.cfg))
         self.fenced = True
 
+    def check_baked(self) -> None:
+        """What a machine image of this stack holds (bake), checked before k3s starts from it: the image is this stack's,
+        k3s is the pinned file, so is kubectl when it's a plain file, and containerd's store is in place. Said at once
+        when anything isn't, since nothing here can fetch what's missing."""
+        digest = self.pinned.digest()
+        if self.baked != digest:
+            raise commands.CommandsError(f"this machine's image holds stack {self.baked[:16]}, not this book's "
+                                         f"{digest[:16]}: it can't start this book's cluster")
+        wanted = [("k3s", Path(self.cfg["bin_dir"]) / "k3s")]
+        if "kubectl" in self.pinned.tools and not \
+                self.pinned.tools["kubectl"]["platforms"][self.platform]["url"].endswith(".tar.gz"):
+            wanted.append(("kubectl", Path(self.cfg["tools_dir"]) / "kubectl"))
+        for name, where in wanted:
+            pin = self.pinned.tools[name]["platforms"][self.platform]["sha256"]
+            if self.host.sha256(str(where)) != pin:
+                raise commands.CommandsError(f"this machine's image has no {name} at its pinned SHA-256 ({where})")
+        store = f"{self.cfg['data_dir']}/agent/containerd"
+        if self.host.run(["test", "-d", store], root=True, check=False).returncode != 0:
+            raise commands.CommandsError(f"this machine's image has no containerd store ({store})")
+
     def prepare(self) -> None:
-        """Install, fence, start k3s once, and keep its clean data dir."""
-        self.install()
+        """Install, fence, start k3s once, and keep its clean data dir. On a machine started from an image of this stack
+        (RE_STACK_BAKED), nothing is installed: what the image holds is checked, and k3s's first start makes this
+        cluster's own certificates and datastore, its images already imported."""
+        if self.baked:
+            self.check_baked()
+            if self.uses_user:
+                self.host.script(user_script(self.cfg))
+        else:
+            self.install()
         if self.block_network:
             try:
                 self.fence()
@@ -510,6 +569,37 @@ class K3sBackend(commands.Backend):
         self.host.script(killall_script(self.cfg))
         self.host.script(snapshot_script(self.cfg))
         self.prepared = True
+
+    def missing_images(self) -> list[str]:
+        """The pinned images containerd doesn't hold yet, by the names the steps use."""
+        r = self.host.run([f"{self.cfg['bin_dir']}/k3s", "ctr", "--namespace", "k8s.io", "images", "list", "--quiet"],
+                          root=True, check=False, timeout=60)
+        have = set((r.stdout or b"").decode("utf-8", "replace").split())
+        return [i["ref"] for i in self.pinned.images if full_ref(i["ref"]) not in have]
+
+    def bake(self) -> dict:
+        """The stack made once into this machine, for a disk image every Lab machine of this stack starts from: installed
+        as prepare installs it, fenced, k3s Ready with every pinned image imported, then stopped, and everything that
+        makes the cluster this machine's own removed (node_state_script), so each machine started from the image makes
+        its own. The network stays fenced throughout, as a session's. What it made."""
+        if self.baked:
+            raise commands.CommandsError("this machine started from a stack's image already: bake from the OS's own")
+        self.install()
+        if self.block_network:
+            self.fence()
+        t0 = self.host.monotonic()
+        seconds = self.start_k3s()
+        missing = self.missing_images()
+        while missing and self.host.monotonic() - t0 <= float(self.cfg["ready_seconds"]):
+            self.host.pause(1)
+            missing = self.missing_images()
+        if missing:
+            raise commands.CommandsError(f"k3s was Ready without the stack's {', '.join(missing)}: nothing to bake")
+        self.host.script(killall_script(self.cfg))
+        self.host.script(node_state_script(self.cfg))
+        self.close()
+        return {"stack": self.pinned.digest(), "k3s": self.pinned.tools["k3s"]["version"], "ready_seconds": seconds,
+                "images": len(self.pinned.images)}
 
     # -- a cluster
 
@@ -589,6 +679,8 @@ class K3sBackend(commands.Backend):
     def describe(self) -> dict:
         out = {"backend": self.name, "k3s": self.pinned.tools["k3s"]["version"], "stack": self.pinned.digest()[:16],
                "network": "blocked" if self.block_network else "open"}
+        if self.baked:
+            out["from_image"] = True
         if self.ready:
             out["ready_seconds"] = dict(self.ready)
         if any(v is not None for v in self.memory.values()):

@@ -108,6 +108,7 @@ class FakeHost(k3s.Host):
         self.memory = memory or {}
         self.tools = tools
         self.root_prefix = []
+        self.ctr_images = ""                 # what `k3s ctr images list --quiet` answers: the images k3s has imported
 
     def where(self, path) -> Path:
         path = Path(path)
@@ -121,6 +122,8 @@ class FakeHost(k3s.Host):
             rc = 0 if self.clock >= self.ready_after else 1
         elif argv[0] == "cat":
             out = b"apiVersion: v1\nkind: Config\n"
+        elif argv[1:3] == ["ctr", "--namespace"]:
+            out = self.ctr_images.encode()
         elif argv[:2] == ["docker", "save"]:
             Path(argv[3]).write_bytes(f"image archive of {argv[4]}\n".encode())
         elif argv[0] == "skopeo":
@@ -155,6 +158,10 @@ class FakeHost(k3s.Host):
 
     def read(self, path):
         return self.memory.get(path)
+
+    def sha256(self, path):
+        target = self.where(path)
+        return sha(target.read_bytes()) if target.is_file() else None
 
     def monotonic(self):
         return self.clock
@@ -390,6 +397,73 @@ def test_each_chapters_peak_memory_is_reported(tmp_path, book_root):
     assert backend.describe()["peak_memory_mib"] == {"first-deployment": 2000}
 
 
+# ---------------------------------------------------------------- a machine image of the stack (bake)
+
+
+def test_the_node_s_own_state_goes_and_containerd_s_store_stays():
+    cfg = k3s.settings()
+    text = k3s.node_state_script(cfg)
+    gone = text.splitlines()[1]
+    for path in ("/var/lib/rancher/k3s/server", "/var/lib/re-k3s/clean", "/etc/rancher/node", "/var/lib/kubelet",
+                 "/var/lib/cni", "/var/log/pods", "/var/log/containers"):
+        assert f" {path}" in gone, path                       # the datastore, TLS, tokens, node password, kubelet
+    assert "find /var/lib/rancher/k3s/agent -mindepth 1 -maxdepth 1 ! -name containerd -exec rm -rf {} +" in text
+    assert "rm -rf /var/lib/rancher/k3s/agent " not in text and "/var/lib/rancher/k3s/data" not in text
+
+
+def test_a_bake_imports_the_stack_until_every_image_is_there_then_leaves_nothing_of_this_node(tmp_path, book_root):
+    book, host, backend = setup(tmp_path, book_root, block_network=True, cfg={"as_user": ["sudo", "-n", "--"]})
+    host.ctr_images = "docker.io/rancher/mirrored-pause:3.6\ndocker.io/library/nginx:1.27.3\n"
+    made = backend.bake()
+    assert made == {"stack": backend.pinned.digest(), "k3s": "v1.31.4+k3s1", "ready_seconds": 0.0, "images": 1}
+    scripts = host.scripts()
+    cfg = backend.cfg
+    assert scripts.index(k3s.wipe_script(cfg)) < scripts.index(k3s.fence_script(cfg))       # installed as prepare does
+    assert scripts[-3:] == [k3s.killall_script(cfg), k3s.node_state_script(cfg), k3s.fence_script(cfg, remove=True)]
+    assert k3s.snapshot_script(cfg) not in scripts                                      # no clean copy in the image
+    assert (tmp_path / "machine" / "var/lib/rancher/k3s/agent/images/stack-000.tar").exists()   # imported as k3s starts
+    assert ["systemctl", "start", "re-k3s"] in host.ran()
+
+
+def test_a_bake_that_s_ready_without_the_stack_s_images_fails(tmp_path, book_root):
+    book, host, backend = setup(tmp_path, book_root, cfg={"ready_seconds": 5})
+    with pytest.raises(commands.CommandsError, match="Ready without the stack's docker.io/library/nginx:1.27.3"):
+        backend.bake()
+    assert k3s.node_state_script(backend.cfg) not in host.scripts()
+
+
+def test_a_machine_from_the_stack_s_image_installs_nothing_and_starts_from_what_it_holds(tmp_path, book_root, monkeypatch):
+    book, host, backend = setup(tmp_path, book_root)
+    host.ctr_images = "docker.io/library/nginx:1.27.3"
+    backend.bake()                                             # the image's disk, as the bake left it
+    fetched = len(host.fetched)
+    monkeypatch.setenv(k3s.BAKED, backend.pinned.digest())
+    images = tmp_path / "no-images"                            # no archive and no cache: nothing to install from
+    baked = k3s.K3sBackend(book, block_network=False, host=host, cfg=backend.cfg, images=images,
+                           cache=tmp_path / "empty-cache")
+    n = len(host.calls)
+    ws = baked.start(book, "first-deployment")
+    later = [c for c in host.calls[n:]]
+    scripts = [c[1] for c in later if c[0] == "script"]
+    assert k3s.wipe_script(baked.cfg) not in scripts and not [c for c in later if c[0] in ("install", "write")]
+    assert ["test", "-d", "/var/lib/rancher/k3s/agent/containerd"] in [c[2] for c in later if c[0] == "run"]
+    snap = scripts.index(k3s.snapshot_script(baked.cfg))       # Ready once, kept, then a start from the copy, as before
+    assert scripts[snap + 1:snap + 3] == [k3s.killall_script(baked.cfg), k3s.restore_script(baked.cfg)]
+    assert len(host.fetched) == fetched and baked.describe()["from_image"] is True
+    baked.stop(ws)
+    # an image of another stack, or one whose k3s isn't the pinned file, never starts this book's cluster
+    monkeypatch.setenv(k3s.BAKED, "0" * 64)
+    other = k3s.K3sBackend(book, block_network=False, host=host, cfg=backend.cfg, images=images)
+    with pytest.raises(commands.CommandsError, match="holds stack 0000000000000000, not this book's"):
+        other.prepare()
+    monkeypatch.setenv(k3s.BAKED, backend.pinned.digest())
+    (tmp_path / "machine" / "usr/local/bin/k3s").write_bytes(b"another k3s\n")
+    with pytest.raises(commands.CommandsError, match="no k3s at its pinned SHA-256"):
+        k3s.K3sBackend(book, block_network=False, host=host, cfg=backend.cfg, images=images).prepare()
+    with pytest.raises(commands.CommandsError, match="bake from the OS's own"):
+        k3s.K3sBackend(book, block_network=False, host=host, cfg=backend.cfg, images=images).bake()
+
+
 # ---------------------------------------------------------------- a chapter, end to end through the runner
 
 
@@ -521,3 +595,31 @@ def test_a_machine_with_no_way_out_reads_the_pinned_files_from_the_urls_it_was_g
     backend.install()
     assert "https://storage.example/signed/k3s?sig=1" in host.fetched
     assert pinned.tools["k3s"]["platforms"]["linux-amd64"]["url"] not in host.fetched
+
+
+@pytest.mark.skipif(not Path("/proc/self/exe").exists(), reason="the shims are told by /proc/{pid}/exe")
+def test_killall_finds_the_shims_by_their_executable_and_never_itself(tmp_path):
+    """GitHub's first real run: matched by command line, the script (run as `sh -c` with its own text) killed itself."""
+    cfg = k3s.settings()
+    line = next(x for x in k3s.killall_script(cfg).splitlines() if x.startswith("pids()"))
+    shim = tmp_path / "k3s" / "data" / "abc123" / "bin" / "containerd-shim-runc-v2"
+    shim.parent.mkdir(parents=True)
+    # A copy of this Python, as the shim: a renamed coreutils binary may not run, since it picks its program by name
+    import sys
+    import time
+    shutil.copy(sys.executable, shim)
+    running = subprocess.Popen([str(shim), "-I", "-S", "-c", "import time; time.sleep(30)"], stderr=subprocess.DEVNULL)
+    time.sleep(0.3)
+    if running.poll() is not None:
+        pytest.skip("a copy of this Python doesn't run here")
+    try:
+        # the pattern itself on this shell's command line, as on the real run's
+        out = subprocess.run(["sh", "-c", f"{line}\n# */k3s/data/*/bin/containerd-shim*\npids; echo self $$"],
+                             capture_output=True, text=True, check=True).stdout.split()
+    finally:
+        running.kill()
+        running.wait()
+    me = out[out.index("self") + 1]
+    found = out[:out.index("self")]
+    assert str(running.pid) in found
+    assert me not in found

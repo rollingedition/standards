@@ -1,0 +1,128 @@
+# Concepts: the format of a book's concepts.toml, beside its book.toml (re_standards/concepts.py, `re-check concepts`).
+#
+# A concept is one term with one meaning in one context, and its definition is the book's own sentence, quoted. The
+# concepts connect into a graph, through the relation types below, so their addresses, contexts and relation types are
+# fixed here, once: an organization's own concepts use the same format, in a namespace of their own, and point at ours.
+
+# Every concept's permanent address, and its version in one edition. Links, mappings and an organization's
+# definitions point at these, never at a page's wording, so a concept's context and ID never change once released.
+[addresses]
+namespace = "rollingedition"                      # ours: the taxonomy's areas and skills, and the contexts books declare
+base = "https://rollingedition.com/concepts"
+concept = "{base}/{context}/{id}"
+edition = "{base}/{context}/{id}@{edition}"
+context = "{base}/{context}"                      # the context itself: the set its concepts are in
+wikidata = "https://www.wikidata.org/entity/{qid}"
+# Our own terms for what SKOS and schema.org have no word for, such as a formula or part-of, so an export loses nothing
+vocabulary = "https://rollingedition.com/concepts/vocabulary#"
+
+# The relation types: a small, fixed set, so the graph stays usable. Each has its plain meaning, with an example, and
+# how it maps onto SKOS, the W3C's standard for concept schemes:
+# - meaning: what "A {type} B" says
+# - skos: the SKOS property it exports as; empty where SKOS has none, and then only `property` carries it
+# - property: our own vocabulary's property, which refines `skos`, so an export keeps the difference
+# - target: what it points at. concept: a concept, in this book or in another context; match: another context's
+#   concept, or Wikidata; package: a package or tool, optionally with a version range; organization: an organization
+# - inverse: the type that says the same thing the other way round; symmetric: it holds both ways
+# - acyclic: no chain of it leads back to where it started
+# - reserved: only an organization's concepts may use it, never a book's
+[relations.broader]
+meaning = "is a kind of: nDCG is a kind of ranking metric"
+skos = "skos:broader"
+property = "broader"
+target = "concept"
+inverse = "narrower"
+acyclic = true
+
+[relations.narrower]
+meaning = "has as a kind: a ranking metric has nDCG as a kind"
+skos = "skos:narrower"
+property = "narrower"
+target = "concept"
+inverse = "broader"
+acyclic = true
+
+# SKOS's hierarchy covers a part and its whole as well as a kind, so part-of exports as skos:broader, refined.
+[relations.part-of]
+meaning = "is part of: a term frequency is part of BM25"
+skos = "skos:broader"
+property = "partOf"
+target = "concept"
+acyclic = true
+
+[relations.measured-from]
+meaning = "is measured from: recall at k is measured from relevance judgments"
+skos = "skos:related"
+property = "measuredFrom"
+target = "concept"
+acyclic = true
+
+[relations.computed-from]
+meaning = "is computed from: nDCG is computed from discounted cumulative gain"
+skos = "skos:related"
+property = "computedFrom"
+target = "concept"
+acyclic = true
+
+[relations.prerequisite-of]
+meaning = "comes before, and is needed for: precision at k comes before mean average precision"
+skos = "skos:related"
+property = "prerequisiteOf"
+target = "concept"
+acyclic = true
+
+[relations.contrasts-with]
+meaning = "is set against: lexical retrieval contrasts with semantic retrieval"
+skos = "skos:related"
+property = "contrastsWith"
+target = "concept"
+symmetric = true
+
+# A package or tool isn't a concept, so SKOS has no property for this: it exports as ours alone, its target as software
+# with the version the book pins.
+[relations.implemented-by]
+meaning = "is implemented by a package or tool, optionally within a version range: BM25 is implemented by bm25s"
+skos = ""
+property = "implementedBy"
+target = "package"
+
+[relations.same-as]
+meaning = "means exactly the same as another context's concept, or a Wikidata item"
+skos = "skos:exactMatch"
+property = "sameAs"
+target = "match"
+symmetric = true
+
+[relations.close-to]
+meaning = "means nearly the same as another context's concept, or a Wikidata item"
+skos = "skos:closeMatch"
+property = "closeTo"
+target = "match"
+symmetric = true
+
+# For an organization's own concepts, which link to ours: never in a book's concepts.toml.
+[relations.maps-to]
+meaning = "an organization's concept maps onto one of ours: their search quality maps to our nDCG"
+skos = "skos:mappingRelation"
+property = "mapsTo"
+target = "concept"
+reserved = "organization"
+
+[relations.defined-by-organization]
+meaning = "is defined by an organization, in its own namespace, for its own use"
+skos = ""
+property = "definedByOrganization"
+target = "organization"
+reserved = "organization"
+
+# How a term's use is found in a chapter before its defining section (W-79), kept conservative so a match is a real
+# use: whole words only, with these characters counted as part of a word, so "nDCG@10" and "BM25-scored" aren't uses
+# of nDCG or BM25. A term with a capital after its first letter, such as BM25 or nDCG, matches only as written; any
+# other matches with its first letter in either case, as at the start of a sentence.
+#
+# What it finds is listed, and doesn't fail the check: a book's terms include ordinary words, such as gain or baseline,
+# and their everyday uses in earlier chapters would otherwise stop a pull request. `re-check concepts --strict` fails on
+# them; fails = true makes every run do so.
+[uses]
+joining = "-_@"
+fails = false

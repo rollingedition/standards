@@ -1,0 +1,35 @@
+# An organization's own concepts, in the same format as a book's: its own namespace and base, its own contexts, each
+# definition quoted from its own documents, and the two relation types reserved for it, pointing at our concepts by
+# their addresses. A placeholder organization, for tests/test_concepts.py.
+
+[namespace]
+id = "example-org"
+base = "https://concepts.example.com"
+
+[[contexts]]
+id = "search-team"
+label = "Search team"
+description = "The search team's metrics and the dashboards that read them."
+
+[[concepts]]
+id = "search-quality"
+term = "search quality"
+context = "search-team"
+definition = "Search quality is nDCG at 10 over last month's judged queries."
+section = "metrics-handbook"                    # a section of the organization's own document
+
+[concepts.relations]
+maps-to = ["https://rollingedition.com/concepts/search-and-recommendation/ndcg"]
+computed-from = ["https://rollingedition.com/concepts/search-and-recommendation/ndcg"]
+defined-by-organization = ["example-org"]
+
+[[concepts]]
+id = "active-index"
+term = "active index"
+context = "search-team"
+definition = "An active index is one rebuilt in the last 24 hours."
+section = "runbook"
+
+[concepts.relations]
+prerequisite-of = ["search-quality"]
+defined-by-organization = ["example-org"]

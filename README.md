@@ -4,9 +4,9 @@ How a Rolling Edition book gets verified, in the open. This is the public, read-
 
 | Path | What |
 | --- | --- |
-| `.github/workflows/book-checks.yml` | The reusable workflow every book pull request runs: examples, book manifest, text addressed to a model, section IDs. `examples-scope` says which examples run: `all` (the default) or `affected` |
+| `.github/workflows/book-checks.yml` | The reusable workflow every book pull request runs: examples, book manifest, text addressed to a model, the agent skill, concepts, section IDs. `examples-scope` says which examples run: `all` (the default) or `affected` |
 | `.github/workflows/book-commands.yml` | The reusable workflow a terminal book's pull requests run, from its `checks.yml`'s `commands` job: the stack's pins and licences, the local lab, and each chapter the change could affect, from a fresh start, on a k3s cluster of its own for a k3s stack. `scope` is `all` (the default) or `affected`; `record`, by hand, records the outputs as the run's artifact. It does nothing for a book with no steps |
-| `.github/workflows/kind-label.yml` | The kind-label check, rerun whenever labels change. A pull request that changes only files a reader doesn't read on the page passes without a kind label: the book's narration files (`narration/`), its agent skill's procedures (`skill.md`) and its generated front page, licences, `renovate.json` and workflows. It has no kind of change and rides with the next edition |
+| `.github/workflows/kind-label.yml` | The kind-label check, rerun whenever labels change. A pull request that changes only files a reader doesn't read on the page passes without a kind label: the book's narration files (`narration/`), its agent skill's procedures (`skill.md`), its concepts (`concepts.toml`) and its generated front page, licences, `renovate.json` and workflows. It has no kind of change and rides with the next edition |
 | `re_standards/rules.py`, `data/rules.toml` | When each newer rule of the checks took effect, so a new rule never stops a released book's pull requests (see Rules with dates) |
 | `data/taxonomy.json` | Areas and skills, the catalog's source of truth, anchored to Wikipedia and Wikidata |
 | `data/review-tiers.toml` | The three review tiers, the file classes triage reads, and the rules that flag a serious risk |
@@ -14,6 +14,7 @@ How a Rolling Edition book gets verified, in the open. This is the public, read-
 | `data/cover-glyphs.json` | The letter outlines a cover file draws its text with, since an image can't load a web font. Generated from the fonts the site uses |
 | `re_standards/catalog.py` | Validates the taxonomy and `book.toml`, and builds the catalog |
 | `re_standards/voice.py`, `data/writing.toml` `[adjustable]` | An authored book's `voice.toml`, beside `book.toml`: the author's voice (`[profile]`: a summary, who speaks, a few traits), a `[glossary]`, words and phrases to `[avoid]`, and `[overrides]` of only the limits the writing standards mark adjustable, within their bounds: lengths, who speaks and the narrative limits that set the tone. Examples that run, versions and numbers, claims and their evidence, citations and accessibility stay as the standards say. `re-check manifest` checks it, and `re-check style` holds the book to it. A change to it alone rides with the next edition, as narration's does |
+| `re_standards/concepts.py`, `data/concepts.toml` | A book's `concepts.toml`, beside `book.toml`: the terms it defines, each quoted from its own sentence, in a context, connected by a fixed set of relation types that follow SKOS, with a permanent address for each (see Concepts). `re-check concepts` checks it; a book without one passes |
 | `re_standards/bookfmt.py`, `sections.py` | The book format: chapters, sections, examples and their frozen IDs, and `sections.json`, with three hashes for each chapter opening and section: `sha256`, of its source; `rendered_sha256`, of its text as read, with every binding filled in from that edition's recorded outputs and pins; and `content_sha256`, the same with each version binding left as written. A section changed when its text as read did, so a library update that moves a number an example prints changes it; when only a version number moved, its content didn't, and the change is a quiet one |
 | `re_standards/steps.py`, `data/commands.toml` | A terminal book's command steps, checks and files (see Terminal books): shell files at the top of `examples/`, embedded as Python examples are, with `#|` directives that Copy and Run leave out, and each chapter's `steps.json` for the Lab and the page. A book with none parses and renders as it did |
 | `re_standards/stack.py`, `data/commands.toml` | A terminal book's stack: `book.toml`'s `[lab]`, the versions the author writes in `examples/stack.in.toml`, and `examples/stack.toml`, generated from it by `re-check stack --pin`, every tool's file by URL and SHA-256, every chart's archive and every image by digest, with their licences (see Terminal books) |
@@ -62,6 +63,8 @@ re-check style --book path/to/book    # the lint rules of the writing standards;
                                       # of a book's own limits, --skip W-7 leaves out a rule it doesn't keep; --base-ref
                                       # <base commit> tells a dated rule whether the change makes the next content edition
 re-check addressed --book path/to/book # text addressed to an AI system (hidden characters, injected instructions)
+re-check concepts --book path/to/book  # concepts.toml: each definition quoted from its section, defined once, relations of the
+                                       # fixed types; lists a term used before its definition with no link (--strict fails)
 re-check narration --book path/to/book # terms no rule reads, and examples, blocks and tables with no description (warns)
 re-check kit --book path/to/book --write --chapter first-id --chapter second-id   # the kit a new draft starts
                                        # with: .gitignore, examples/lib (threads and seeds), recordings/recorded.py
@@ -81,6 +84,44 @@ A new rule holds a released book from its next content edition, so it never stop
 Anywhere else, what it finds is a warning, with when the rule takes hold, and the check passes. A rule that isn't listed holds every book; one that guards readers or their agents is never listed. `re-check manifest`, `style`, `skill` and `addressed` take `--base-ref`, the pull request's base, which the reusable workflow passes.
 
 A released book's own workflows are generated, and change only through a pull request a maintainer approves, since a change under `.github/` is flagged. So when their templates change, `re-check readme` warns that a released book's workflows are out of date, and fails only a draft's. The rest of the generated front page fails when it's out of date, and Rolling Edition's agent regenerates it on the pull request's branch.
+
+## Concepts
+
+A book may index the terms it defines in `concepts.toml`, beside `book.toml` (writing standards, section 16). A concept is one term with one meaning in one context, and its definition is the book's own sentence, quoted:
+
+```toml
+context = "search-and-recommendation"      # the context of every concept that names none of its own
+
+[[contexts]]                               # a narrower context of the book's own, only where two meanings meet
+id = "graded-relevance"
+broader = "search-evaluation"              # a taxonomy area or skill, or another context declared here
+label = "Graded relevance"
+
+[[concepts]]
+id = "ndcg"                                # with its context, its permanent address: never changed once released
+term = "Normalized DCG"
+aliases = ["nDCG", "nDCG@k"]               # the forms readers search for
+definition = "Normalized DCG (nDCG) divides a ranking's DCG by the DCG of the ideal ranking"   # its section's words
+formula = "nDCG@k = DCG@k / DCG@k of the ideal ranking"
+section = "ndcg"                           # a section's ID, or a chapter's for its opening
+example = "ndcg-by-hand"                   # an example that shows it, run on every release
+applies_to = ["scikit-learn"]              # what its meaning depends on: each edition gives the version it's pinned at
+wikidata = "Q…"                            # its Wikidata item, where there is one
+
+[concepts.relations]
+computed-from = ["dcg"]                    # a concept here; context/ID for one here in another context
+broader = ["ranking-metric"]
+close-to = ["https://rollingedition.com/concepts/machine-learning/evaluation-metric"]   # another context's, by address
+implemented-by = [{ to = "scikit-learn", versions = ">=1.5" }]
+```
+
+- **Contexts are namespaces.** Ours are the taxonomy's areas and skills, and the narrower contexts books declare, each under one of them. An organization's file is the same format with a `[namespace]` table naming its own `id` and `base`: its concepts are in contexts it declares, never in ours, and it points at ours by their addresses. `concepts.load` reads such a file on its own, with no book.
+- **Permanent addresses** come from `data/concepts.toml` (`[addresses]`): `https://rollingedition.com/concepts/{context}/{id}`, and an edition's version of it, `…/{id}@{edition}`.
+- **Relation types** are a small, fixed set, each with its plain meaning, its SKOS property and whether it may go round in a circle, in `data/concepts.toml` (`[relations]`): broader and narrower, part-of, measured-from, computed-from, prerequisite-of, contrasts-with, implemented-by (a package or tool, with an optional version range), same-as and close-to (another context's concept, or `wikidata:Q…`), and, for an organization's concepts only, maps-to and defined-by-organization.
+
+`re-check concepts` fails a definition or formula that isn't in its section's text word for word (emphasis, links, line breaks and entities aside, as the renderer reads them; bindings as written), a section that doesn't exist, a concept defined twice, an ID or alias that names two concepts in a context, an unknown context, an `applies_to` the book doesn't pin, a relation of an unknown type or to a concept that doesn't exist, a circle, and a pin outside an implemented-by range. It lists, without failing, a chapter that uses a term before its defining section with no link to it: whole words only, a term with a capital after its first letter, such as BM25, only as written, never inside a longer concept's name, and never in the defining chapter's opening. `--strict` fails on those too. A change to `concepts.toml` alone rides with the next edition, as `skill.md`'s does.
+
+At each release, `concepts.served` gives each concept in the shape it's served in: its addresses, the definition as read, the version each package it applies to is pinned at (`examples/requirements.txt`, or a terminal book's `examples/stack.toml`), the edition it was first defined in and last changed in, and its provenance: the book, the section, the edition and the commit. Its fields map onto JSON-LD as schema.org `DefinedTerm` and SKOS `Concept`, each relation onto its type's SKOS property.
 
 ## Only the examples a change touches
 

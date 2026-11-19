@@ -309,7 +309,8 @@ def readme(book: Book, cfg: dict | None = None) -> str:
         "",
         "---",
         "",
-        ("" if preview else f'<a href="{cfg["site"]}"><img src="{cfg["site"]}{cfg["paths"]["icon"]}" width="28" alt=""></a> ')
+        # Our icon on every front page, a draft's too: it's the site's, not the book's, so it's there before an edition is
+        f'<a href="{cfg["site"]}"><img src="{cfg["site"]}{cfg["paths"]["icon"]}" width="28" alt=""></a> '
         + f"{cfg['about']} [{cfg['site'].split('//')[1]}]({cfg['site']})",
         "",
     ]

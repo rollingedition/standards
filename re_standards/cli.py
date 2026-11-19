@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import addressed as addressed_check, affected, base_image, bookfmt, catalog, checks, community, data_path, examples, kit, readme, resolve, rules, skill, spoken, style, voice
-from . import commands, labscripts, stack
+from . import commands, concepts, labscripts, stack
 from . import models as model_files
 
 
@@ -449,6 +449,22 @@ def cmd_skill(args) -> int:
                         book.root, book.manifest, args.base_ref)
 
 
+def cmd_concepts(args) -> int:
+    """concepts.toml (concepts.py): what the book defines, each quoted from its own text, connected by the fixed
+    relation types (W-77 to W-80). A book without one passes."""
+    book = bookfmt.load_book(Path(args.book))
+    cs = book.concepts
+    if not cs.present:
+        return report("Concepts", [], f"no {concepts.FILE}: the book indexes no concepts yet, so there's nothing to check")
+    problems, notes = concepts.check(book, catalog.load_taxonomy(taxonomy_path(args)))
+    n_relations = sum(len(c.relations) for c in cs)
+    rc = report("Concepts", problems, f"{len(cs)} concept(s) in {len({c.context for c in cs})} context(s), each "
+                f"definition quoted from its section, with {n_relations} relation(s) of the fixed types")
+    if notes:
+        report("Concepts, terms used before their definition", notes, "", warn=True)
+    return 1 if notes and args.strict else rc
+
+
 def cmd_narration(args) -> int:
     book = bookfmt.load_book(Path(args.book))
     if args.chapter and args.chapter not in {c.chapter_id for c in book.chapters}:
@@ -662,6 +678,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--config", help="writing.toml (default: this standards checkout)")
     s.add_argument("--base-ref", help=base_ref)
     s.set_defaults(fn=cmd_skill)
+
+    s = sub.add_parser("concepts", help="concepts.toml: each definition and formula quoted from its section, each "
+                       "concept defined once, a term linked where it's used before its definition, and relations of the "
+                       "fixed types, with no circle; a book without one passes")
+    s.add_argument("--book", default=".")
+    s.add_argument("--taxonomy", help="taxonomy.json, whose areas and skills are the contexts (default: this standards "
+                                      "checkout)")
+    s.add_argument("--strict", action="store_true", help="exit 1 when a term is used before its definition with no link, "
+                                                        "which otherwise is listed and passes")
+    s.set_defaults(fn=cmd_concepts)
 
     s = sub.add_parser("narration", help="the spoken script: terms no rule reads, and examples, blocks and tables with no "
                        "description (warns; never fails, unless --strict)")

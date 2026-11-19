@@ -1,0 +1,11 @@
+# A small book for the concepts checks' tests (tests/test_concepts.py): two chapters whose sentences define the terms
+# its concepts.toml indexes, with every field and every relation type a book's concepts may use.
+slug = "concepts-sampler"
+title = "Concepts Sampler"
+summary = "A test book on scoring rankings: precision and recall at k, discounted cumulative gain and nDCG, each term defined once in the text and connected to the others, on one small ranking of lamps and rugs."
+status = "live"
+level = "foundations"
+skills = ["search-evaluation"]
+line = "main"
+core_libraries = ["scikit-learn"]
+sponsor = ""

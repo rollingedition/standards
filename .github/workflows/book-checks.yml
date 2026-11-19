@@ -86,6 +86,9 @@ jobs:
         run: re-check addressed --book . --base-ref "$BASE_SHA"
       - name: Check the agent skill's procedures
         run: re-check skill --book . --base-ref "$BASE_SHA"
+      # A book without concepts.toml passes. A term used before its definition with no link is listed, not failed.
+      - name: Check the concepts against the book's text
+        run: re-check concepts --book .
 
   section-ids:
     name: section-ids

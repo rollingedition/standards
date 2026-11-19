@@ -1,0 +1,116 @@
+# The terms this book defines, each quoted from its own sentence (writing standards W-77 to W-80): every field, and
+# every relation type a book may use. An organization's file adds a [namespace], and the two types reserved for it.
+
+context = "search-and-recommendation"          # the context of every concept below that names none of its own
+
+# A narrower context of the book's own, under one of the taxonomy's skills, where "gain" means a grade's worth
+[[contexts]]
+id = "graded-relevance"
+broader = "search-evaluation"
+label = "Graded relevance"
+description = "Where a judgment is a grade, and a gain is what the grade is worth to a score."
+
+# Defined in a chapter's opening, so its section is the chapter's ID
+[[concepts]]
+id = "relevance"
+term = "Relevance"
+definition = "Relevance is how well a result meets the need behind a query"
+section = "scoring-a-ranking"
+wikidata = "Q1472529"
+
+[concepts.relations]
+prerequisite-of = ["relevance-judgment"]
+same-as = ["wikidata:Q1472529"]
+
+[[concepts]]
+id = "relevance-judgment"
+term = "relevance judgment"
+aliases = ["judgment"]
+definition = "A **relevance judgment** is a person's label for one pair of a query and a result."
+section = "judge-each-result"
+
+[concepts.relations]
+prerequisite-of = ["precision-at-k"]
+close-to = ["https://rollingedition.com/concepts/machine-learning/label"]   # another context's, by its address
+
+[[concepts]]
+id = "precision-at-k"
+term = "Precision at k"
+aliases = ["precision@k"]
+definition = "Precision at k, written precision@k, is the share of the top k results that are relevant."
+formula = "precision@k = relevant results in the top k / k"
+section = "count-relevant-at-the-top"
+example = "precision-and-recall"
+
+[concepts.relations]
+broader = ["ranking-metric"]
+measured-from = ["relevance-judgment"]
+contrasts-with = ["recall-at-k"]
+prerequisite-of = ["ndcg"]
+
+[[concepts]]
+id = "recall-at-k"
+term = "Recall at k"
+aliases = ["recall@k"]
+definition = "Recall at k, recall@k, is the share of all relevant results that appear in the top k."
+section = "count-relevant-at-the-top"
+example = "precision-and-recall"
+
+[concepts.relations]
+broader = ["ranking-metric"]
+measured-from = ["relevance-judgment"]
+
+[[concepts]]
+id = "ranking-metric"
+term = "ranking metric"
+definition = "A ranking metric is a number that scores a whole ranking against the judgments."
+section = "ranking-metrics"
+
+[concepts.relations]
+narrower = ["ndcg"]
+close-to = ["wikidata:Q25211005"]
+
+[[concepts]]
+id = "gain"
+term = "gain"
+context = "graded-relevance"
+definition = "A gain is what a result's grade is worth to the score."
+section = "dcg"
+
+[concepts.relations]
+part-of = ["search-and-recommendation/dcg"]    # this book's, in another context: context/ID
+
+[[concepts]]
+id = "dcg"
+term = "Discounted cumulative gain"
+aliases = ["DCG"]
+definition = "Discounted cumulative gain (DCG) is the sum of the top k results' gains, each divided by a discount that grows with its position."
+section = "dcg"
+
+[concepts.relations]
+computed-from = ["graded-relevance/gain"]
+prerequisite-of = ["ndcg"]
+
+[[concepts]]
+id = "discount"
+term = "discount"
+definition = "The discount is the part of DCG that shrinks a gain lower down: the logarithm, base 2, of the position plus one."
+section = "dcg"
+
+[concepts.relations]
+part-of = ["dcg"]
+
+[[concepts]]
+id = "ndcg"
+term = "Normalized DCG"
+aliases = ["nDCG", "nDCG@k"]
+definition = """Normalized DCG (nDCG) divides a ranking's DCG by the DCG of the ideal ranking, the judged results \
+sorted by grade, so a perfect ranking scores 1"""
+formula = "nDCG@k = DCG@k / DCG@k of the ideal ranking"
+section = "ndcg"
+applies_to = ["scikit-learn"]
+example = "ndcg-by-hand"
+
+[concepts.relations]
+computed-from = ["dcg"]
+implemented-by = [{ to = "scikit-learn", versions = ">=1.5" }]

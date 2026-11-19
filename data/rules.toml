@@ -33,3 +33,8 @@ content = ["prose", "code"]
 "W-74" = { since = "2026-11-19", what = "nothing in the cluster reaches the network" }
 "W-75" = { since = "2026-11-19", what = "the stack runs only what readers may run as a service" }
 "W-76" = { since = "2026-11-19", what = "steps run in any bash, 3.2 included" }
+# W-77 to W-80 check concepts.toml, which no book had before them, so `re-check concepts` holds every book that has one
+"W-77" = { since = "2026-11-19", what = "a concept's definition and formula are quoted exactly from its section" }
+"W-78" = { since = "2026-11-19", what = "one concept, one definition, in one context" }
+"W-79" = { since = "2026-11-19", what = "a term used before its definition links to it" }
+"W-80" = { since = "2026-11-19", what = "concepts relate only through the fixed relation types" }

@@ -7,6 +7,7 @@ A book repo holds:
     examples/{example_id}.py   one runnable example per file; expected stdout in examples/{example_id}.out
     redirects.yml              retired ID -> successor ID
     examples/{step_id}.sh      a terminal book's command step or check, with examples/{step_id}.out (steps.py)
+    concepts.toml              optional: the terms the book defines, each quoted from its text (concepts.py)
 
 Inside a chapter, the first line after the front matter is the `# Title`. Every `##` and `###` heading is
 a section and carries an explicit, frozen ID: `## Why position matters {#why-position-matters}`. An
@@ -21,6 +22,7 @@ import hashlib
 import re
 import unicodedata
 from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path
 from typing import Callable
 
@@ -151,6 +153,14 @@ class Book:
     @property
     def sections(self) -> list[Section]:
         return [s for c in self.chapters for s in c.sections]
+
+    @cached_property
+    def concepts(self):
+        """The book's concepts.toml, beside book.toml (concepts.ConceptSet): what it defines, each quoted from its text.
+        Empty, with `present` false, when it has none. Read when first asked for; its problems are its own, for
+        `re-check concepts`, never the section-ID check's."""
+        from . import concepts      # concepts.py reads the book's sections, so it imports this module
+        return concepts.for_book(self.root)
 
     def ids(self) -> dict[str, str]:
         """Every live ID and what it names: chapter, section or example."""

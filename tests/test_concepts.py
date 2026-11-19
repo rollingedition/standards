@@ -1,0 +1,553 @@
+"""concepts.toml (re_standards/concepts.py): the terms a book defines, each quoted from its own sentence, connected by a
+fixed set of relation types (writing standards W-77 to W-80). The fixture tests/fixtures/concepts-sampler uses every
+field and every relation type a book may use; tests/fixtures/concepts-organization.toml is an organization's file, in
+its own namespace, with the two types reserved for it."""
+import shutil
+import tomllib
+from pathlib import Path
+
+import pytest
+import yaml
+
+from bookkit import make_book
+from re_standards import bookfmt, checks, cli, concepts, data_path, rules, standards_root
+
+FIXTURES = Path(__file__).parent / "fixtures"
+SAMPLER = FIXTURES / "concepts-sampler"
+ORGANIZATION = FIXTURES / "concepts-organization.toml"
+
+
+def sampler(tmp_path, edit=None, chapter=None, toml=None) -> bookfmt.Book:
+    """The fixture, copied: `edit` replaces text in its concepts.toml, (old, new) or a list of them; `chapter` in a
+    chapter, (file, old, new) or a list of them; `toml` is a whole concepts.toml instead."""
+    root = tmp_path / "sampler"
+    shutil.copytree(SAMPLER, root)
+    path = root / concepts.FILE
+    if toml is not None:
+        path.write_text(toml)
+    for old, new in [edit] if edit and isinstance(edit[0], str) else edit or []:
+        text = path.read_text()
+        assert old in text, old
+        path.write_text(text.replace(old, new, 1))
+    for file, old, new in [chapter] if chapter and isinstance(chapter[0], str) else chapter or []:
+        text = (root / "chapters" / file).read_text()
+        assert old in text, old
+        (root / "chapters" / file).write_text(text.replace(old, new, 1))
+    return bookfmt.load_book(root)
+
+
+# Chapter 1 without its opening's link to nDCG, or its mention of it: the use in its last section is then its first
+QUIET = ("01-scoring-a-ranking.md", "[Chapter 2](#ndcg) builds nDCG on the same judgments.",
+         "Chapter 2 builds on the same judgments.")
+UNLINKED = [QUIET, ("01-scoring-a-ranking.md", "[nDCG](#ndcg) also weighs", "nDCG also weighs")]
+
+
+def problems(book: bookfmt.Book) -> list[str]:
+    found, notes = concepts.check(book)
+    return found
+
+
+def notes(book: bookfmt.Book) -> list[str]:
+    return concepts.check(book)[1]
+
+
+# ---------------------------------------------------------------- the fixture and the format
+
+
+def test_the_fixture_passes_with_every_field_and_relation_type(tmp_path, capsys):
+    book = bookfmt.load_book(SAMPLER)
+    assert book.problems == [] and concepts.check(book) == ([], [])
+    assert cli.main(["concepts", "--book", str(SAMPLER)]) == 0
+    assert "ok  9 concept(s) in 2 context(s), each definition quoted from its section, with 18 relation(s)" in \
+        capsys.readouterr().out
+    raw = tomllib.loads((SAMPLER / concepts.FILE).read_text())
+    fields = {key for c in raw["concepts"] for key in c}
+    assert fields == concepts.CONCEPT_KEYS, concepts.CONCEPT_KEYS - fields
+    org = concepts.load(ORGANIZATION)
+    used = {r.type for c in book.concepts for r in c.relations} | {r.type for c in org for r in c.relations}
+    assert used == set(concepts.relation_types())                        # every type, the reserved two in org's file
+
+
+def test_a_book_without_concepts_passes_and_its_concepts_are_empty(tmp_path, capsys):
+    book = bookfmt.load_book(make_book(tmp_path / "tiny"))
+    assert not book.concepts.present and len(book.concepts) == 0 and list(book.concepts) == []
+    assert concepts.check(book) == ([], [])
+    assert cli.main(["concepts", "--book", str(book.root)]) == 0
+    assert "no concepts.toml: the book indexes no concepts yet" in capsys.readouterr().out
+
+
+def test_book_concepts_reads_the_file_beside_book_toml_and_load_reads_one_alone():
+    book = bookfmt.load_book(SAMPLER)
+    cs = book.concepts
+    assert cs.present and cs.ours and cs.namespace == "rollingedition" and cs.context == "search-and-recommendation"
+    ndcg = cs.get("search-and-recommendation", "ndcg")
+    assert ndcg.aliases == ["nDCG", "nDCG@k"] and ndcg.applies_to == ["scikit-learn"] and ndcg.example == "ndcg-by-hand"
+    assert concepts.Relation("implemented-by", "scikit-learn", ">=1.5") in ndcg.relations
+    assert cs.get("graded-relevance", "gain").context == "graded-relevance"
+    assert cs.contexts["graded-relevance"].broader == "search-evaluation"
+    alone = concepts.load(SAMPLER / concepts.FILE)
+    assert [c.key for c in alone] == [c.key for c in cs] and alone.problems == []
+    assert not concepts.load(SAMPLER / "nothing.toml").present
+
+
+def test_addresses_come_from_the_standards_data():
+    cs = bookfmt.load_book(SAMPLER).concepts
+    base = concepts.settings()["addresses"]["base"]
+    assert base == "https://rollingedition.com/concepts"
+    assert cs.address("search-and-recommendation", "ndcg") == f"{base}/search-and-recommendation/ndcg"
+    assert cs.address("search-and-recommendation", "ndcg", "2026.11.8") == f"{base}/search-and-recommendation/ndcg@2026.11.8"
+    assert cs.context_address("graded-relevance") == f"{base}/graded-relevance"
+
+
+def test_every_relation_type_says_what_it_means_and_how_it_maps_onto_skos():
+    types = concepts.relation_types()
+    assert set(types) == {"broader", "narrower", "part-of", "measured-from", "computed-from", "prerequisite-of",
+                          "contrasts-with", "implemented-by", "same-as", "close-to", "maps-to", "defined-by-organization"}
+    for name, spec in types.items():
+        assert spec["meaning"] and spec["property"] and spec["target"] in ("concept", "match", "package", "organization")
+        assert spec["skos"] == "" or spec["skos"].startswith("skos:"), name
+        if "inverse" in spec:
+            assert types[spec["inverse"]]["inverse"] == name
+    assert types["prerequisite-of"]["acyclic"] and types["same-as"]["skos"] == "skos:exactMatch"
+    assert {n for n, s in types.items() if s.get("reserved") == "organization"} == {"maps-to", "defined-by-organization"}
+
+
+def test_the_format_says_what_it_cant_read(tmp_path):
+    found = problems(sampler(tmp_path, toml='''context = "search-and-recommendation"
+colour = "blue"
+
+[[concepts]]
+id = "Not An ID"
+term = "x"
+definition = "x"
+section = "dcg"
+
+[[concepts]]
+id = "no-term"
+definition = "A gain is what a result's grade is worth to the score."
+section = "dcg"
+synonyms = ["y"]
+wikidata = "2539"
+'''))
+    assert found == [
+        "concepts.toml: unknown keys: colour; it holds context, [namespace], [[contexts]] and [[concepts]]",
+        "concepts.toml:4: Not An ID: a concept's ID is lowercase words joined by hyphens, at most 64 characters",
+        "concepts.toml:10: no-term: unknown keys: synonyms",
+        "concepts.toml:10: no-term: needs term",
+        "concepts.toml:10: no-term: wikidata is an item's ID, such as Q2539"]
+    assert problems(sampler(tmp_path / "bad", toml="[[concepts]\n")) [0].startswith("concepts.toml does not parse:")
+
+
+def test_a_concept_is_in_a_context_of_the_taxonomy_or_one_the_book_declares(tmp_path):
+    found = problems(sampler(tmp_path, edit=[('id = "graded-relevance"\nbroader = "search-evaluation"',
+                                              'id = "graded-relevance"\nbroader = "searching"'),
+                                             ('context = "graded-relevance"', 'context = "gains"')]))
+    assert "concepts.toml:7: the context graded-relevance is narrower than 'searching', which isn't a taxonomy area " \
+           "or skill, or a context declared here" in found
+    assert "concepts.toml:73: gain: 'gains' isn't a context: use a taxonomy area or skill, or declare a narrower one " \
+           "under [[contexts]]" in found
+    found = problems(sampler(tmp_path / "shadow", edit=('id = "graded-relevance"', 'id = "search-relevance"')))
+    assert "concepts.toml:7: search-relevance is already one of the taxonomy's areas and skills: use it, don't declare " \
+           "it" in found
+    lost = sampler(tmp_path / "none", edit=('context = "search-and-recommendation"          #', '#'))
+    assert "concepts.toml:14: relevance: name its context, or give the file one with context = \"…\" at its top" in \
+        problems(lost)
+
+
+def test_a_book_s_concepts_are_in_our_namespace(tmp_path):
+    book = sampler(tmp_path, edit=('context = "search-and-recommendation"          #',
+                                   '[namespace]\nid = "acme"\nbase = "https://concepts.example.com"\n\n#'))
+    assert problems(book) == ["concepts.toml: a book's concepts are in our namespace; only an organization's file names "
+                              "its own"]
+
+
+# ---------------------------------------------------------------- W-77: quoted from the book's own sentence
+
+
+def test_quotes_match_through_emphasis_links_line_breaks_and_bindings_as_written():
+    source = ("A **relevance judgment**, written\n[judgment](#x), is a *person's* label &amp; more. It prints "
+              "{{out:ex:count}} rows.\n\n```text\nnDCG@k  =  DCG@k / IDCG@k\n```\n")
+    assert concepts.quoted_in("A relevance judgment, written judgment, is a person's label & more.", source)
+    assert concepts.quoted_in("A **relevance judgment**, written [judgment](#x), is a *person's* label", source)
+    assert concepts.quoted_in("It prints {{out:ex:count}} rows.", source)
+    assert concepts.quoted_in("nDCG@k = DCG@k / IDCG@k", source)
+    assert not concepts.quoted_in("It prints 12 rows.", source)                     # the value, not the binding
+    assert not concepts.quoted_in("relevance judgment, written judgment, is a persons label", source)
+    assert not concepts.quoted_in("elevance judgment", source)                       # from a word's edge to a word's edge
+    assert not concepts.quoted_in("label & more. It prints", "label &amp; more.\n\nIt prints")   # never across blocks
+
+
+def test_a_definition_or_formula_not_in_its_section_fails(tmp_path):
+    book = sampler(tmp_path, edit=[("is the share of the top k results that are relevant.",
+                                    "is the fraction of the top k results that are relevant."),
+                                   ('formula = "nDCG@k = DCG@k / DCG@k of the ideal ranking"',
+                                    'formula = "nDCG@k = DCG@k / IDCG@k"')])
+    assert problems(book) == [
+        "concepts.toml:36: precision-at-k: W-77: its definition isn't in #count-relevant-at-the-top's text, word for "
+        "word: quote the book's own sentence, as the section writes it (emphasis, links and line breaks aside)",
+        "concepts.toml:103: ndcg: W-77: its formula isn't in #ndcg's text, word for word: quote the book's own formula, "
+        "as the section writes it (emphasis, links and line breaks aside)"]
+
+
+def test_a_quote_of_the_text_as_read_says_to_quote_its_bindings_as_written(tmp_path):
+    book = sampler(tmp_path, chapter=("02-graded-gains.md", "At scikit-learn {{version:scikit-learn}}, `ndcg_score` uses",
+                                      "The ranking scores {{out:ndcg-by-hand:ndcg@3}}. At scikit-learn, `ndcg_score` uses"),
+                   edit=('formula = "nDCG@k = DCG@k / DCG@k of the ideal ranking"', 'formula = "The ranking scores 0.860"'))
+    assert problems(book) == [
+        "concepts.toml:103: ndcg: W-77: its formula isn't in #ndcg's text, word for word: quote the book's own formula, "
+        "as the section writes it (emphasis, links and line breaks aside); it quotes the text as read: quote its "
+        "bindings as written, such as {{out:…}}"]
+
+
+def test_a_quote_from_another_section_says_where_it_is(tmp_path):
+    book = sampler(tmp_path, edit=('section = "judge-each-result"', 'section = "dcg"'))
+    assert problems(book) == [
+        "concepts.toml:25: relevance-judgment: W-77: its definition isn't in #dcg's text, word for word: quote the "
+        "book's own sentence, as the section writes it (emphasis, links and line breaks aside); it's in "
+        "#judge-each-result, so give that section"]
+
+
+def test_the_section_exists_and_a_retired_one_names_its_successor(tmp_path):
+    book = sampler(tmp_path, edit=('section = "ranking-metrics"', 'section = "metrics"'))
+    assert problems(book) == ["concepts.toml:63: ranking-metric: W-77: there is no section #metrics in this book"]
+    (book.root / "redirects.yml").write_text("metrics: ranking-metrics\n")
+    assert problems(bookfmt.load_book(book.root)) == [
+        "concepts.toml:63: ranking-metric: W-77: #metrics is retired; its successor is #ranking-metrics"]
+
+
+def test_what_a_definition_applies_to_is_pinned(tmp_path):
+    book = sampler(tmp_path, edit=('applies_to = ["scikit-learn"]', 'applies_to = ["scikit-learn", "bm25s"]'))
+    assert problems(book) == ["concepts.toml:103: ndcg: W-77: applies_to names bm25s, which examples/requirements.txt "
+                              "doesn't pin: the version a definition is true for comes from the book's pins"]
+
+
+def test_an_example_is_one_the_book_has(tmp_path):
+    book = sampler(tmp_path, edit=('example = "ndcg-by-hand"', 'example = "ndcg-twice"'))
+    assert problems(book) == ["concepts.toml:103: ndcg: there is no example 'ndcg-twice' in this book"]
+
+
+# ---------------------------------------------------------------- W-78: one concept, one definition
+
+
+def test_a_concept_is_defined_once_and_its_names_are_unique_in_its_context(tmp_path):
+    book = sampler(tmp_path, edit=[('id = "discount"', 'id = "dcg"'),
+                                   ('aliases = ["recall@k"]', 'aliases = ["recall@k", "Precision@k"]'),
+                                   ('aliases = ["nDCG", "nDCG@k"]', 'aliases = ["nDCG", "Normalized DCG"]')])
+    found = problems(book)
+    assert "concepts.toml:94: dcg: W-78: dcg is in search-and-recommendation twice (see line 83); a book defines a " \
+           "concept once" in found
+    assert "concepts.toml:51: recall-at-k: W-78: 'Precision@k' names both precision-at-k and recall-at-k in " \
+           "search-and-recommendation: a term or alias names one concept in a context, and a second meaning goes in a " \
+           "context of its own" in found
+    assert "concepts.toml:103: ndcg: W-78: 'Normalized DCG' is listed twice for ndcg" in found
+
+
+def test_two_concepts_never_quote_the_same_definition(tmp_path):
+    book = sampler(tmp_path, edit=("Recall at k, recall@k, is the share of all relevant results that appear in the "
+                                   "top k.", "Precision at k, written precision@k, is the share of the top k results "
+                                   "that are relevant."))
+    assert "concepts.toml:51: recall-at-k: W-78: recall-at-k quotes the same definition as precision-at-k: one " \
+           "definition, one concept" in problems(book)
+
+
+def test_one_id_in_two_contexts_is_two_concepts_and_a_bare_reference_to_it_must_say_which(tmp_path):
+    toml = """context = "search-and-recommendation"
+
+[[contexts]]
+id = "graded-relevance"
+broader = "search-evaluation"
+
+[[contexts]]
+id = "ranked-lists"
+broader = "search-evaluation"
+
+[[concepts]]
+id = "gain"
+term = "gain"
+definition = "A gain is what a result's grade is worth to the score."
+section = "dcg"
+
+[[concepts]]
+id = "gain"
+term = "gain"
+context = "graded-relevance"
+definition = "A gain is what a result's grade is worth"
+section = "dcg"
+
+[concepts.relations]
+close-to = ["gain"]
+
+[[concepts]]
+id = "discount"
+term = "discount"
+context = "ranked-lists"
+definition = "The discount is the part of DCG that shrinks a gain lower down"
+section = "dcg"
+
+[concepts.relations]
+contrasts-with = ["gain"]
+"""
+    assert problems(sampler(tmp_path, toml=toml)) == [         # no W-78: two contexts, two concepts
+        "concepts.toml:17: gain: W-80: gain is close-to itself",   # a bare ID is its own context's first
+        "concepts.toml:27: discount: W-80: contrasts-with gain: gain is in graded-relevance and search-and-recommendation: "
+        "write context/gain"]
+    fixed = toml.replace('close-to = ["gain"]', 'close-to = ["search-and-recommendation/gain"]').replace(
+        'contrasts-with = ["gain"]', 'contrasts-with = ["graded-relevance/gain"]')
+    assert problems(sampler(tmp_path / "fixed", toml=fixed)) == []
+
+
+# ---------------------------------------------------------------- W-79: link a term used before its definition
+
+
+def test_a_term_used_before_its_definition_with_no_link_is_listed_and_strict_fails(tmp_path, capsys):
+    book = sampler(tmp_path, chapter=UNLINKED)
+    assert problems(book) == []
+    assert notes(book) == ['chapters/01-scoring-a-ranking.md:38: W-79: "nDCG" comes before its definition in #ndcg '
+                           '(chapter 2): link this first use, as [nDCG](#ndcg)']
+    assert cli.main(["concepts", "--book", str(book.root)]) == 0
+    assert "Concepts, terms used before their definition: 1 warning(s)" in capsys.readouterr().err
+    assert cli.main(["concepts", "--book", str(book.root), "--strict"]) == 1
+
+
+def test_a_link_earlier_in_the_chapter_or_in_the_same_block_is_enough(tmp_path):
+    earlier = sampler(tmp_path, chapter=("01-scoring-a-ranking.md", "[nDCG](#ndcg) also weighs", "nDCG also weighs"))
+    assert notes(earlier) == []                         # the opening links it, then uses it, before the last section
+    same = sampler(tmp_path / "same", chapter=[QUIET, ("01-scoring-a-ranking.md", "[nDCG](#ndcg) also weighs",
+                                                       "nDCG, [defined later](#ndcg), also weighs")])
+    assert notes(same) == []
+    book = sampler(tmp_path / "sub", chapter=[("02-graded-gains.md", "## Normalize by the ideal ranking {#ndcg}",
+                                               "## Normalize by the ideal ranking {#ndcg}\n\nWhy.\n\n"
+                                               "### The ideal ranking {#ideal}"),
+                                              ("01-scoring-a-ranking.md", "[nDCG](#ndcg) also weighs",
+                                               "nDCG also weighs")],
+                   edit=('section = "ndcg"', 'section = "ideal"'))
+    assert notes(book) == []                            # linked to #ndcg, the ## section its ### #ideal is under
+
+
+def test_what_isnt_a_use_code_headings_longer_names_and_the_defining_chapter_s_opening(tmp_path):
+    chapter = "01-scoring-a-ranking.md"
+    assert notes(sampler(tmp_path / "plain", chapter=UNLINKED))       # the use the variants below change
+    for n, new in enumerate(["`nDCG` also weighs",                                      # inline code
+                             "nDCG@10 also weighs",                                     # joined to more
+                             "an ndcg also weighs",                                     # a capital inside: as written
+                             "{{out:precision-and-recall:recall@3}} also weighs"]):     # a binding
+        book = sampler(tmp_path / str(n), chapter=[QUIET, (chapter, "[nDCG](#ndcg) also weighs", new)])
+        assert notes(book) == [], new
+    heading = sampler(tmp_path / "heading", chapter=[QUIET, (chapter, "[nDCG](#ndcg) also weighs", "it also weighs"),
+                                                     (chapter, "### Metrics that score", "### nDCG and metrics that score")])
+    assert notes(heading) == []
+    longer = sampler(tmp_path / "longer", chapter=(chapter, "the simplest;", "the simplest, and discounted cumulative "
+                                                   "gain is another;"))
+    assert [n.split(": ")[2] for n in notes(longer)] == ['"discounted cumulative gain" comes before its definition in '
+                                                        '#dcg (chapter 2)']   # never "gain", inside dcg's longer name
+    promise = sampler(tmp_path / "promise", chapter=("02-graded-gains.md", "compute DCG and nDCG by hand",
+                                                     "compute DCG and nDCG and their discount by hand"))
+    assert notes(promise) == []                                         # its own chapter's opening promises it
+
+
+def test_a_term_s_first_letter_matches_in_either_case_unless_it_has_capitals_inside(tmp_path):
+    chapter = "01-scoring-a-ranking.md"
+    found = notes(sampler(tmp_path, chapter=(chapter, "the simplest;", "the simplest, as a Gain shows;")))
+    assert found == ['chapters/01-scoring-a-ranking.md:38: W-79: "Gain" comes before its definition in #dcg (chapter '
+                     '2): link this first use, as [Gain](#dcg)']
+    assert notes(sampler(tmp_path / "caps", chapter=(chapter, "the simplest;", "the simplest, as DISCOUNTS show;"))) == []
+
+
+# ---------------------------------------------------------------- W-80: relations from the fixed set
+
+
+def test_a_relation_s_type_is_from_the_fixed_set_and_names_a_concept_that_exists(tmp_path):
+    book = sampler(tmp_path, edit=[('measured-from = ["relevance-judgment"]\ncontrasts-with',
+                                    'measured-from = ["relevance-judgments"]\nexplains = ["dcg"]\ncontrasts-with'),
+                                   ('part-of = ["dcg"]', 'part-of = ["discount"]')])
+    assert problems(book) == [
+        "concepts.toml:36: precision-at-k: W-80: measured-from relevance-judgments: there's no concept "
+        "relevance-judgments in this book",
+        "concepts.toml:36: precision-at-k: W-80: 'explains' isn't a relation type; use one of broader, narrower, "
+        "part-of, measured-from, computed-from, prerequisite-of, contrasts-with, implemented-by, same-as, close-to, "
+        "maps-to, defined-by-organization",
+        "concepts.toml:95: discount: W-80: discount is part-of itself"]   # a line down: "explains" is one more
+
+
+def test_a_reference_to_another_context_is_well_formed_and_one_in_its_own_context_exists(tmp_path):
+    book = sampler(tmp_path, edit=[('part-of = ["search-and-recommendation/dcg"]', 'part-of = ["graded-relevance/dcg"]'),
+                                   ('close-to = ["https://rollingedition.com/concepts/machine-learning/label"]',
+                                    'close-to = ["https://rollingedition.com/concepts/machine-learning/label@2026.11.1", '
+                                    '"https://example.com/label", "kitchen/label"]')])
+    assert problems(book) == [
+        "concepts.toml:25: relevance-judgment: W-80: close-to "
+        "https://rollingedition.com/concepts/machine-learning/label@2026.11.1: machine-learning/label@2026.11.1: point "
+        "at a concept's address, never at one edition of it",
+        "concepts.toml:25: relevance-judgment: W-80: close-to https://example.com/label: https://example.com/label isn't "
+        "a concept's address: it starts https://rollingedition.com/concepts/",
+        "concepts.toml:25: relevance-judgment: W-80: close-to kitchen/label: 'kitchen' isn't a context: a taxonomy area "
+        "or skill, or one declared here",
+        "concepts.toml:73: gain: W-80: part-of graded-relevance/dcg: there's no concept dcg in graded-relevance in this "
+        "book"]
+
+
+def test_same_as_and_close_to_point_at_another_context_or_wikidata(tmp_path):
+    book = sampler(tmp_path, edit=('close-to = ["wikidata:Q25211005"]', 'close-to = ["ndcg", "wikidata:Q25211005"]'))
+    assert problems(book) == [
+        "concepts.toml:63: ranking-metric: W-80: close-to links to another context's concept, or to a Wikidata item "
+        "(wikidata:Q…); in one context, two concepts that mean the same are one concept"]
+
+
+def test_prerequisites_and_the_hierarchy_never_go_round_in_a_circle(tmp_path):
+    book = sampler(tmp_path, edit=[('[concepts.relations]\ncomputed-from = ["dcg"]',
+                                    '[concepts.relations]\ncomputed-from = ["dcg"]\nprerequisite-of = ["relevance"]'),
+                                   ('narrower = ["ndcg"]', 'narrower = ["ndcg"]\nbroader = ["precision-at-k"]')])
+    assert problems(book) == [                          # each circle once, from its least concept
+        "concepts.toml:36: precision-at-k: W-80: broader goes round in a circle: precision-at-k → ranking-metric → "
+        "precision-at-k (narrower counted the other way round)",
+        "concepts.toml:104: ndcg: W-80: prerequisite-of goes round in a circle: ndcg → relevance → relevance-judgment → "
+        "precision-at-k → ndcg"]
+
+
+def test_a_version_range_goes_with_implemented_by_and_holds_the_pin(tmp_path):
+    book = sampler(tmp_path, edit=[('versions = ">=1.5"', 'versions = ">=1.8"'),
+                                   ('part-of = ["dcg"]', 'part-of = [{ to = "dcg", versions = ">=1" }]')])
+    assert problems(book) == [
+        "concepts.toml:94: discount: W-80: a version range goes with implemented-by, the package's; part-of dcg has one",
+        "concepts.toml:103: ndcg: W-80: implemented-by scikit-learn >=1.8, and the book pins scikit-learn 1.7.2: say the "
+        "range the relation holds within, or the definition the new version needs"]
+    book = sampler(tmp_path / "range", edit=('versions = ">=1.5"', 'versions = "one point five"'))
+    assert problems(book) == ["concepts.toml:103: ndcg: W-80: scikit-learn's versions 'one point five' isn't a version "
+                              "range, such as \">=0.3,<0.4\""]
+
+
+def test_the_types_reserved_for_organizations_are_refused_in_a_book(tmp_path):
+    book = sampler(tmp_path, edit=('part-of = ["dcg"]', 'part-of = ["dcg"]\nmaps-to = ["dcg"]'))
+    assert problems(book) == ["concepts.toml:94: discount: W-80: maps-to is for an organization's own concepts, never a "
+                              "book's"]
+
+
+# ---------------------------------------------------------------- an organization's file
+
+
+def test_an_organization_s_file_has_its_own_namespace_and_points_at_ours():
+    cs = concepts.load(ORGANIZATION)
+    assert cs.problems == [] and not cs.ours and cs.namespace == "example-org"
+    assert cs.address("search-team", "search-quality") == "https://concepts.example.com/search-team/search-quality"
+    assert concepts.context_problems(cs) == [] and concepts.relation_problems(cs, concepts.known_contexts(cs)) == []
+    assert concepts.known_contexts(cs) == {"search-team"}                # never ours: its concepts live in its own
+    target, _ = concepts.resolve(cs, "https://rollingedition.com/concepts/search-and-recommendation/ndcg", "search-team",
+                                 concepts.known_contexts(cs))
+    assert (target.namespace, target.context, target.id, target.local) == ("rollingedition", "search-and-recommendation",
+                                                                           "ndcg", False)
+    sources = {"metrics-handbook": "For dashboards, **Search quality** is nDCG at 10 over last month's judged queries.",
+               "runbook": "An active index is one rebuilt in the last 24 hours."}
+    assert concepts.quote_problems(cs, sources.get) == []               # its own documents stand in for a book's sections
+
+
+def test_an_organization_s_namespace_names_its_own_base():
+    cs = concepts.parse('[namespace]\nid = "acme"\n')
+    assert cs.problems == ["concepts.toml: an organization's namespace names its own base, an https:// address under "
+                           "which its concepts' addresses go"]
+    assert concepts.parse('[namespace]\nid = "rollingedition"\nbase = "https://example.com"\n').problems == [
+        "concepts.toml: our namespace's base is https://rollingedition.com/concepts"]
+
+
+# ---------------------------------------------------------------- served
+
+
+def test_served_gives_each_concept_its_addresses_versions_edition_and_provenance():
+    book = bookfmt.load_book(SAMPLER)
+    base = "https://rollingedition.com/concepts"
+    records = concepts.served(book, "2026.11.8", changed={f"{base}/search-and-recommendation/ndcg":
+                                                          {"first": "2026.10.1", "changed": "2026.11.3"}},
+                              commit="a" * 40)
+    by_id = {r["id"]: r for r in records}
+    ndcg = by_id["ndcg"]
+    assert ndcg["address"] == f"{base}/search-and-recommendation/ndcg"
+    assert ndcg["edition_address"] == f"{base}/search-and-recommendation/ndcg@2026.11.8"
+    assert ndcg["context_address"] == f"{base}/search-and-recommendation" and ndcg["namespace"] == "rollingedition"
+    assert ndcg["applies_to"] == [{"package": "scikit-learn", "version": "1.7.2"}]
+    assert (ndcg["edition"], ndcg["first_edition"], ndcg["changed_edition"]) == ("2026.11.8", "2026.10.1", "2026.11.3")
+    assert ndcg["section"] == {"id": "ndcg", "chapter": "graded-gains", "title": "Normalize by the ideal ranking"}
+    assert ndcg["provenance"] == {"book": "concepts-sampler", "file": "concepts.toml", "section": "ndcg",
+                                  "edition": "2026.11.8", "commit": "a" * 40, "checked_by": "re-check concepts"}
+    assert {"type": "implemented-by", "skos": None, "property": "implementedBy", "package": "scikit-learn",
+            "versions": ">=1.5", "version": "1.7.2"} in ndcg["relations"]
+    assert {"type": "computed-from", "skos": "skos:related", "property": "computedFrom",
+            "target": f"{base}/search-and-recommendation/dcg"} in ndcg["relations"]
+    judgment = by_id["relevance-judgment"]
+    assert judgment["definition"] == "A relevance judgment is a person's label for one pair of a query and a result."
+    assert judgment["first_edition"] == judgment["changed_edition"] == "2026.11.8"     # new in this edition
+    assert by_id["relevance"]["wikidata"] == "https://www.wikidata.org/entity/Q1472529"
+    assert {"type": "same-as", "skos": "skos:exactMatch", "property": "sameAs",
+            "target": "https://www.wikidata.org/entity/Q1472529"} in by_id["relevance"]["relations"]
+    assert by_id["gain"]["relations"][0]["target"] == f"{base}/search-and-recommendation/dcg"
+    assert concepts.served(book, "2026.11.8", commit="a" * 40) == concepts.served(book, "2026.11.8", commit="a" * 40)
+
+
+def test_served_binds_a_definition_and_a_terminal_book_s_versions_come_from_its_stack(tmp_path):
+    root = tmp_path / "bound"
+    shutil.copytree(SAMPLER, root)
+    chapter = root / "chapters" / "02-graded-gains.md"
+    chapter.write_text(chapter.read_text().replace("At scikit-learn {{version:scikit-learn}}, `ndcg_score` uses",
+                                                   "**ndcg_score** scores at scikit-learn {{version:scikit-learn}} and uses"))
+    (root / concepts.FILE).write_text((root / concepts.FILE).read_text() + '''
+[[concepts]]
+id = "ndcg-score"
+term = "ndcg_score"
+definition = "ndcg_score scores at scikit-learn {{version:scikit-learn}}"
+section = "ndcg"
+''')
+    book = bookfmt.load_book(root)
+    assert concepts.check(book) == ([], [])
+    (record,) = [r for r in concepts.served(book, "2026.11.8") if r["id"] == "ndcg-score"]
+    assert record["definition"] == "ndcg_score scores at scikit-learn 1.7.2"
+    terminal = FIXTURES / "k3s-sampler"
+    pins = bookfmt.load_book(terminal).pins
+    tool = next(name for name in ("kubectl", "k3s") if name in pins)
+    copy = tmp_path / "terminal"
+    shutil.copytree(terminal, copy)
+    first = bookfmt.load_book(copy).sections[0]
+    words = concepts.squash(" ".join(b.text for b in concepts.blocks(first.source) if b.kind == "prose"))
+    sentence = words.split(". ")[0]
+    (copy / concepts.FILE).write_text(f'''context = "cloud-computing"
+
+[[concepts]]
+id = "first-idea"
+term = "first idea"
+definition = "{sentence}"
+section = "{first.section_id}"
+applies_to = ["{tool}"]
+''')
+    book = bookfmt.load_book(copy)
+    assert concepts.check(book)[0] == []
+    assert concepts.served(book, "2026.11.1")[0]["applies_to"] == [{"package": tool, "version": pins[tool]}]
+
+
+# ---------------------------------------------------------------- the checks' place
+
+
+def test_the_book_checks_workflow_runs_it_and_a_change_to_concepts_alone_rides_along():
+    flow = yaml.safe_load((standards_root() / ".github" / "workflows" / "book-checks.yml").read_text())
+    runs = [s.get("run", "") for s in flow["jobs"]["manifest"]["steps"]]
+    assert "re-check concepts --book ." in runs
+    with open(data_path("review-tiers.toml"), "rb") as f:
+        assert tomllib.load(f)["files"]["concepts"] == [concepts.FILE]
+    assert checks.rides_along([concepts.FILE]) and checks.check_kind_label([], [concepts.FILE]) == []
+    assert checks.riding_words([concepts.FILE, "skill.md"]) == "the agent skill's procedures and the book's concepts"
+    assert not checks.rides_along([concepts.FILE, "chapters/01-scoring-a-ranking.md"])
+
+
+def test_the_rules_are_dated_and_their_problems_name_them():
+    days = rules.dated()
+    assert all(f"W-{n}" in days for n in range(77, 81))
+    text = (standards_root() / "writing" / "README.md").read_text()
+    assert all(f"**W-{n} " in text for n in range(77, 81)) and "## 16. Concepts" in text
+
+
+@pytest.mark.parametrize("rule", ["W-77", "W-78", "W-79", "W-80"])
+def test_each_rule_s_problems_lead_with_its_id(rule, tmp_path):
+    edits = {"W-77": ('section = "ranking-metrics"', 'section = "metrics"'),
+             "W-78": ('aliases = ["recall@k"]', 'aliases = ["recall@k", "precision@k"]'),
+             "W-80": ('part-of = ["dcg"]', 'part-of = ["discount"]')}
+    if rule == "W-79":
+        found = notes(sampler(tmp_path, chapter=UNLINKED))
+    else:
+        found = problems(sampler(tmp_path, edit=edits[rule]))
+    assert found and all(rules.rule_of(p) == rule for p in found)

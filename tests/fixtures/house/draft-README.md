@@ -54,4 +54,4 @@ Rolling Edition, its logo and the edition stamp are trademarks of Distributed LL
 
 ---
 
-Rolling Edition publishes free technical books that AI drafts, people verify, and an automated pipeline keeps current. [rollingedition.com](https://rollingedition.com)
+<a href="https://rollingedition.com"><img src="https://rollingedition.com/assets/logos/rolling-edition-icon.svg" width="28" alt=""></a> Rolling Edition publishes free technical books that AI drafts, people verify, and an automated pipeline keeps current. [rollingedition.com](https://rollingedition.com)

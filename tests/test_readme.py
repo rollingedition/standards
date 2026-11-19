@@ -43,16 +43,19 @@ def test_a_draft_book_reads_as_an_unpublished_draft(tmp_path):
         assert absent not in text, absent
 
 
-def test_a_draft_readme_carries_no_images(tmp_path):
-    """A draft's repository is private and its checks run only on pull requests, so a Checks badge has nothing to
-    show; the site that would serve the mark isn't live yet. The text and links stay."""
+def test_a_draft_readme_carries_no_cover_stamp_or_badges_but_our_icon(tmp_path):
+    """A draft has no cover, stamp or edition yet, and its checks run only on pull requests, so a Checks badge has
+    nothing to show. Our icon is the site's, not the book's, so the footer carries it, as a released book's does."""
     from bookkit import MANIFEST
     root = make_book(tmp_path, manifest=MANIFEST.replace('status = "live"', 'status = "draft"') + MANIFEST_EXTRA)
     text = readme.readme(bookfmt.load_book(root))
-    for image in ("![", "<img", "badge.svg", "rolling-edition-icon.svg"):
+    for image in ("![", "badge.svg", "cover.svg", "stamp.svg"):
         assert image not in text, image
-    assert text.rstrip().endswith("Rolling Edition publishes free technical books that AI drafts, people verify, and an "
-                                  "automated pipeline keeps current. [rollingedition.com](https://rollingedition.com)")
+    assert text.count("<img") == 1
+    assert text.rstrip().endswith('<a href="https://rollingedition.com"><img src="https://rollingedition.com/assets/logos/'
+                                  'rolling-edition-icon.svg" width="28" alt=""></a> Rolling Edition publishes free '
+                                  "technical books that AI drafts, people verify, and an automated pipeline keeps current. "
+                                  "[rollingedition.com](https://rollingedition.com)")
     assert "A test book.\n\n**Draft: not yet published.**" in text            # the summary, then the banner
 
 

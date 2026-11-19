@@ -18,6 +18,9 @@ skill = ["skill.md"]
 # An authored book's voice: how its drafting tools write, never on the page. Like narration, a change to it alone has no
 # kind of change and rides with the next edition; it's always the lead author's ([authors] lead_files).
 voice = ["voice.toml"]
+# The terms the book defines, each quoted from its chapters (concepts.toml, beside book.toml). Like skill.md they aren't on
+# the page, so a change to them alone has no kind of change and rides with the next edition; their checks still run.
+concepts = ["concepts.toml"]
 meta = ["book.toml", "redirects.yml", "CODEOWNERS", "renovate.json", "README.md", "CITATION.cff", "LICENSE",
         "LICENSE-CODE", ".gitignore", ".github/workflows/*"]
 

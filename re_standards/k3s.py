@@ -5,6 +5,8 @@
 
 Once on a machine, before the first chapter:
 
+- **Check the machine's own tools** ([k3s] host_tools: rsync, iptables and the rest): one that's missing is said by
+  name before anything changes, rather than as an obscure failure later.
 - **Install** from examples/stack.toml: k3s for linux-amd64 and its airgap images, and the stack's kubectl and helm. Each
   file is fetched once into the cache ([k3s] cache, or RE_STACK_CACHE) and checked by its SHA-256 before it's used: from
   its publisher, or on a machine with no way out, from the URL RE_STACK_FILES gives for its SHA-256. The stack's images,
@@ -16,12 +18,16 @@ Once on a machine, before the first chapter:
 - **The fence**, with the network blocked (the default): the steps run as a user of their own ([k3s] steps_user), and
   iptables lets that user's processes, and the pods, reach only this machine and the cluster's own addresses.
 - **Ready** within [k3s] ready_seconds: the API, the node and kube-system's deployments. Then k3s stops, the images it
-  imported leave its import folder, and the clean data dir is kept ([k3s] snapshot_dir).
+  imported leave its import folder, and the clean data dir is kept ([k3s] snapshot_dir), copied with its hard links,
+  extended attributes and ACLs (_mirror): overlayfs marks a layer's opaque folders with an extended attribute, so a copy
+  without them would change what containers see.
 
 Then for each chapter:
 
 1. k3s stops, and everything it ran is killed.
-2. The clean data dir is restored. The image store's blobs, which never change, stay in place.
+2. The clean data dir is restored. The image store's blobs, which never change, stay in place. Right after the clean
+   copy is kept, or on a machine fresh from a stack's image, the data dir is the clean copy already, so the first
+   start needs no restore.
 3. k3s starts and is Ready again.
 4. The chapter gets a workspace with the book's files, an admin kubeconfig, and the stack's tools first on its PATH.
 
@@ -30,12 +36,15 @@ order, or on different machines. Each chapter's peak memory, k3s and its pods to
 reported, so chapters can be written to the Lab's machine.
 
 **A machine image of the stack** (bake): the Lab's machines start from a disk image made once per stack, so a session
-doesn't import the stack's images at every start. The bake installs as above, starts k3s until it's Ready with every
-pinned image imported, stops it, and removes everything that makes the cluster this machine's own (node_state_script):
-the server's datastore, certificates and tokens, the agent's certificates and settings, the node's password, the
-kubelet's state. containerd's content and snapshots stay. On a machine started from that image, RE_STACK_BAKED names the
-stack it holds: nothing is installed, what's there is checked against the pins, and the first start makes the cluster's
-own certificates and datastore, then the clean data dir is kept as above.
+neither imports the stack's images nor makes its clean copy at every start. The bake installs as above, starts k3s until
+it's Ready with every pinned image imported, stops it, and keeps the clean data dir as above, in the image. The cluster
+itself stays: its datastore, certificates, tokens and node password are the image's, the same on every machine started
+from it. That's safe where each machine is isolated, as the Lab's are: nothing reaches another machine's API server, and
+whoever uses a machine is its root already, so the keys give them nothing they don't have. It also makes the Lab's
+clusters more like the checks': each starts from one cluster made once. Only the first start's logs are left out
+(image_logs_script). On a machine started from that image, RE_STACK_BAKED names the stack it holds: nothing is
+installed, what's there is checked against the pins (k3s, kubectl, containerd's store, the clean copy, the node's
+password), and k3s starts from the clean data dir as it is.
 
 Everything that changes the machine goes through a Host. The real one runs as root through sudo. Tests give a fake, so
 nothing here needs Docker, k3s or root to be tested. The first real run is the pull request's job on GitHub's
@@ -226,10 +235,23 @@ exit 0
 """
 
 
+MIRROR = "rsync -aHAX --numeric-ids --delete"
+
+
 def _mirror(cfg: dict, src: str, dst: str) -> str:
-    """dst made a copy of src, leaving [k3s] snapshot_keep alone on both sides."""
+    """dst made an exact copy of src, leaving [k3s] snapshot_keep alone on both sides, as root. -a keeps times, owners,
+    modes, symbolic links and device files (overlayfs's whiteouts are character devices); -H keeps hard links, which
+    image layers hold; -X keeps extended attributes, which overlayfs marks a layer's opaque folders with
+    (trusted.overlay.opaque, copied by root alone) and file capabilities live in (security.capability); -A keeps ACLs;
+    --numeric-ids copies owners as numbers, never by name. Plain -a dropped the attributes and hard links, so a restored
+    layer could silently show a container files it should hide."""
     keep = " ".join(f"--exclude={shlex.quote('/' + k.strip('/') + '/')}" for k in cfg["snapshot_keep"])
-    return f"rsync -a --delete {keep} {shlex.quote(src.rstrip('/') + '/')} {shlex.quote(dst.rstrip('/') + '/')}"
+    return f"{MIRROR} {keep} {shlex.quote(src.rstrip('/') + '/')} {shlex.quote(dst.rstrip('/') + '/')}"
+
+
+def tools_script(tools: list[str]) -> str:
+    """Each tool that isn't on root's PATH, one name a line: nothing when every one is there."""
+    return f"for t in {' '.join(shlex.quote(t) for t in tools)}; do command -v \"$t\" >/dev/null 2>&1 || echo \"$t\"; done\n"
 
 
 def wipe_script(cfg: dict) -> str:
@@ -253,18 +275,16 @@ def restore_script(cfg: dict) -> str:
     return f"set -e\n{_mirror(cfg, cfg['snapshot_dir'], cfg['data_dir'])}\n"
 
 
-def node_state_script(cfg: dict) -> str:
-    """Everything that makes a cluster this machine's own, removed once k3s has stopped, so every machine started from an
-    image of this disk makes its own (bake): all of the server's folder (its datastore, certificates, tokens and
-    credentials), all of the agent's but containerd's store (its certificates, kubeconfigs, generated settings and the
-    import folder's archives), the node's password, the kubelet's and CNI's state, the pods' logs and any clean copy.
-    containerd's content and snapshots stay: the stack's images, imported once. k3s's own unpacked binaries stay too."""
-    data = cfg["data_dir"]
-    gone = (f"{data}/server", cfg["snapshot_dir"], "/etc/rancher/node", "/var/lib/kubelet", "/var/lib/cni",
-            "/var/log/pods", "/var/log/containers")
-    return (f"set -e\nrm -rf {' '.join(shlex.quote(p) for p in gone)}\n"
-            f"find {shlex.quote(data + '/agent')} -mindepth 1 -maxdepth 1 ! -name containerd -exec rm -rf {{}} +\n"
-            f"rm -f {shlex.quote(data + '/agent/containerd/containerd.log')}\n")
+def image_logs_script(cfg: dict) -> str:
+    """What a bake leaves out of a stack's image, once k3s has stopped and before the clean copy is kept: the logs of the
+    cluster's first start (the pods' and containerd's), which every machine started from the image would carry. The
+    cluster stays whole (module docstring): its datastore, certificates, tokens and node password, the kubelet's state,
+    containerd's content and snapshots, and k3s's unpacked binaries."""
+    return (f"set -e\nrm -rf /var/log/pods /var/log/containers\n"
+            f"rm -f {shlex.quote(cfg['data_dir'] + '/agent/containerd/containerd.log')}\n")
+
+
+NODE_PASSWORD = "/etc/rancher/node/password"     # the agent's half of the node's password; the datastore holds its hash
 
 
 def user_script(cfg: dict) -> str:
@@ -437,6 +457,9 @@ class K3sBackend(commands.Backend):
         self.baked = os.environ.get(BAKED, "")
         self.prepared = False
         self.fenced = False
+        # The data dir is the clean copy as it is, k3s not started since it was kept (prepare) or since the machine
+        # started from a stack's image: the next start needs no restore
+        self.fresh = False
         self.ready: dict[str, float] = {}             # chapter -> seconds from starting k3s to Ready
         self.memory: dict[str, int | None] = {}       # chapter -> peak MiB, k3s and its pods
         self._sampler: MemorySampler | None = None
@@ -527,10 +550,31 @@ class K3sBackend(commands.Backend):
         self.host.script(fence_script(self.cfg))
         self.fenced = True
 
+    def tools(self) -> list[str]:
+        """What the backend runs on the machine itself ([k3s] host_tools), with the steps' own command while they run as
+        their own user (as_user's first word, sudo)."""
+        return [*self.cfg["host_tools"], *([self.cfg["as_user"][0]] if self.uses_user else [])]
+
+    def missing_tools(self) -> list[str]:
+        """The tools root's PATH doesn't have, in the order they're listed."""
+        wanted = self.tools()
+        r = self.host.script(tools_script(wanted), check=False, timeout=60)
+        said = set((r.stdout or b"").decode("utf-8", "replace").split())
+        return [t for t in wanted if t in said]
+
+    def check_tools(self) -> None:
+        """Every tool the backend runs is on the machine, checked before anything changes: one that isn't is said by
+        name, rather than as a failure halfway through the install, the fence or the clean copy."""
+        missing = self.missing_tools()
+        if missing:
+            raise commands.CommandsError(f"this machine lacks {', '.join(missing)}, which the k3s backend runs ([k3s] "
+                                         f"host_tools): install {'it' if len(missing) == 1 else 'them'} first")
+
     def check_baked(self) -> None:
         """What a machine image of this stack holds (bake), checked before k3s starts from it: the image is this stack's,
-        k3s is the pinned file, so is kubectl when it's a plain file, and containerd's store is in place. Said at once
-        when anything isn't, since nothing here can fetch what's missing."""
+        k3s is the pinned file, so is kubectl when it's a plain file, and containerd's store, the cluster's clean copy
+        and the node's password are in place. Said at once when anything isn't, since nothing here can fetch what's
+        missing."""
         digest = self.pinned.digest()
         if self.baked != digest:
             raise commands.CommandsError(f"this machine's image holds stack {self.baked[:16]}, not this book's "
@@ -543,14 +587,19 @@ class K3sBackend(commands.Backend):
             pin = self.pinned.tools[name]["platforms"][self.platform]["sha256"]
             if self.host.sha256(str(where)) != pin:
                 raise commands.CommandsError(f"this machine's image has no {name} at its pinned SHA-256 ({where})")
-        store = f"{self.cfg['data_dir']}/agent/containerd"
-        if self.host.run(["test", "-d", store], root=True, check=False).returncode != 0:
-            raise commands.CommandsError(f"this machine's image has no containerd store ({store})")
+        held = [("-d", f"{self.cfg['data_dir']}/agent/containerd", "containerd store"),
+                ("-d", f"{self.cfg['snapshot_dir']}/server", "clean copy of its cluster"),
+                ("-f", NODE_PASSWORD, "node password")]
+        for test, where, what in held:
+            if self.host.run(["test", test, where], root=True, check=False).returncode != 0:
+                raise commands.CommandsError(f"this machine's image has no {what} ({where})")
 
     def prepare(self) -> None:
-        """Install, fence, start k3s once, and keep its clean data dir. On a machine started from an image of this stack
-        (RE_STACK_BAKED), nothing is installed: what the image holds is checked, and k3s's first start makes this
-        cluster's own certificates and datastore, its images already imported."""
+        """Check the machine's tools, install, fence, start k3s once, and keep its clean data dir. On a machine started
+        from an image of this stack (RE_STACK_BAKED), nothing is installed and nothing is copied: what the image holds is
+        checked, and its data dir is the clean copy already, the cluster's own certificates and datastore included, so
+        the first start is from it as it is."""
+        self.check_tools()
         if self.baked:
             self.check_baked()
             if self.uses_user:
@@ -565,9 +614,11 @@ class K3sBackend(commands.Backend):
                     raise commands.CommandsError(f"the network can't be fenced here: {e}. Set RE_COMMANDS_ALLOW_NETWORK=1 "
                                                  "to run the steps with the network open, for local use only") from None
                 self.block_network = False
-        self.ready["first start"] = self.start_k3s()
-        self.host.script(killall_script(self.cfg))
-        self.host.script(snapshot_script(self.cfg))
+        if not self.baked:
+            self.ready["first start"] = self.start_k3s()
+            self.host.script(killall_script(self.cfg))
+            self.host.script(snapshot_script(self.cfg))
+        self.fresh = True
         self.prepared = True
 
     def missing_images(self) -> list[str]:
@@ -577,13 +628,27 @@ class K3sBackend(commands.Backend):
         have = set((r.stdout or b"").decode("utf-8", "replace").split())
         return [i["ref"] for i in self.pinned.images if full_ref(i["ref"]) not in have]
 
+    def sizes(self) -> dict[str, int]:
+        """The bytes of the data dir and of its clean copy, as du counts them: what a stack's image holds of the cluster.
+        A size du can't read is left out."""
+        out = {}
+        for key, where in (("data_bytes", self.cfg["data_dir"]), ("clean_bytes", self.cfg["snapshot_dir"])):
+            r = self.host.run(["du", "-sb", where], root=True, check=False, timeout=600)
+            first = (r.stdout or b"").decode("utf-8", "replace").split()[:1]
+            if r.returncode == 0 and first and first[0].isdigit():
+                out[key] = int(first[0])
+        return out
+
     def bake(self) -> dict:
-        """The stack made once into this machine, for a disk image every Lab machine of this stack starts from: installed
-        as prepare installs it, fenced, k3s Ready with every pinned image imported, then stopped, and everything that
-        makes the cluster this machine's own removed (node_state_script), so each machine started from the image makes
-        its own. The network stays fenced throughout, as a session's. What it made."""
+        """The stack made once into this machine, for a disk image every Lab machine of this stack starts from (module
+        docstring): the tools checked, installed as prepare installs it, fenced, k3s Ready with every pinned image
+        imported, then stopped, the first start's logs left out (image_logs_script) and the clean data dir kept, so a
+        machine started from the image neither imports nor copies anything at its start. The cluster stays whole: one
+        identity per image, shared by every machine started from it. The network stays fenced throughout, as a
+        session's. What it made, with the bytes of the data dir and its clean copy."""
         if self.baked:
             raise commands.CommandsError("this machine started from a stack's image already: bake from the OS's own")
+        self.check_tools()
         self.install()
         if self.block_network:
             self.fence()
@@ -596,10 +661,12 @@ class K3sBackend(commands.Backend):
         if missing:
             raise commands.CommandsError(f"k3s was Ready without the stack's {', '.join(missing)}: nothing to bake")
         self.host.script(killall_script(self.cfg))
-        self.host.script(node_state_script(self.cfg))
+        self.host.script(image_logs_script(self.cfg))
+        self.host.script(snapshot_script(self.cfg))
+        made = {"stack": self.pinned.digest(), "k3s": self.pinned.tools["k3s"]["version"], "ready_seconds": seconds,
+                "images": len(self.pinned.images), **self.sizes()}
         self.close()
-        return {"stack": self.pinned.digest(), "k3s": self.pinned.tools["k3s"]["version"], "ready_seconds": seconds,
-                "images": len(self.pinned.images)}
+        return made
 
     # -- a cluster
 
@@ -630,12 +697,20 @@ class K3sBackend(commands.Backend):
                 self.host.pause(1)
         return round(self.host.monotonic() - t0, 1)
 
+    def restart(self) -> float:
+        """A fresh start of the clean cluster: k3s stopped with everything it ran, the clean data dir back (unless the
+        data dir is the clean copy as it is: fresh), and Ready again. The seconds to Ready. Each chapter's start, and a
+        Lab's reset."""
+        self.host.script(killall_script(self.cfg))
+        if not self.fresh:
+            self.host.script(restore_script(self.cfg))
+        self.fresh = False
+        return self.start_k3s()
+
     def start(self, book: Book, chapter_id: str) -> commands.Workspace:
         if not self.prepared:
             self.prepare()
-        self.host.script(killall_script(self.cfg))
-        self.host.script(restore_script(self.cfg))
-        self.ready[chapter_id] = self.start_k3s()
+        self.ready[chapter_id] = self.restart()
         root = Path(tempfile.mkdtemp(prefix=f"re-k3s-{chapter_id}-"))
         home, work = root / "home", root / "work"
         (home / ".kube").mkdir(parents=True)

@@ -109,6 +109,9 @@ class FakeHost(k3s.Host):
         self.tools = tools
         self.root_prefix = []
         self.ctr_images = ""                 # what `k3s ctr images list --quiet` answers: the images k3s has imported
+        self.missing: set[str] = set()       # tools root's PATH lacks, as the tool check finds them
+        self.absent: set[str] = set()        # paths `test` finds missing
+        self.du: dict[str, int] = {}         # what `du -sb` counts, by path
 
     def where(self, path) -> Path:
         path = Path(path)
@@ -124,6 +127,10 @@ class FakeHost(k3s.Host):
             out = b"apiVersion: v1\nkind: Config\n"
         elif argv[1:3] == ["ctr", "--namespace"]:
             out = self.ctr_images.encode()
+        elif argv[0] == "test":
+            rc = 1 if argv[-1] in self.absent else 0
+        elif argv[:2] == ["du", "-sb"]:
+            rc, out = (0, f"{self.du[argv[2]]}\t{argv[2]}\n".encode()) if argv[2] in self.du else (1, b"")
         elif argv[:2] == ["docker", "save"]:
             Path(argv[3]).write_bytes(f"image archive of {argv[4]}\n".encode())
         elif argv[0] == "skopeo":
@@ -134,7 +141,11 @@ class FakeHost(k3s.Host):
 
     def script(self, text, *, timeout=None, check=True):
         self.calls.append(("script", text))
-        return subprocess.CompletedProcess(["sh"], 0, b"", b"")
+        out = b""
+        if text.startswith("for t in ") and "command -v" in text:          # the tool check: the missing ones, by name
+            listed = text[len("for t in "):].split(";", 1)[0].split()
+            out = "".join(f"{t}\n" for t in listed if t in self.missing).encode()
+        return subprocess.CompletedProcess(["sh"], 0, out, b"")
 
     def fetch(self, url, dest):
         self.fetched.append(url)
@@ -234,10 +245,33 @@ def test_the_fence_lets_the_steps_and_the_pods_reach_only_the_cluster():
 def test_a_restore_keeps_the_image_store_and_restores_everything_else():
     cfg = k3s.settings()
     restore = k3s.restore_script(cfg)
-    assert "rsync -a --delete --exclude=/agent/containerd/io.containerd.content.v1.content/ /var/lib/re-k3s/clean/ " \
-           "/var/lib/rancher/k3s/" in restore
+    assert "rsync -aHAX --numeric-ids --delete --exclude=/agent/containerd/io.containerd.content.v1.content/ " \
+           "/var/lib/re-k3s/clean/ /var/lib/rancher/k3s/" in restore
     snap = k3s.snapshot_script(cfg)
     assert snap.index("agent/images") < snap.index("rsync -a")              # imported images leave the import folder first
+    assert "rsync -aHAX --numeric-ids --delete " in snap
+
+
+@pytest.mark.skipif(shutil.which("rsync") is None, reason="needs rsync")
+def test_the_clean_copy_keeps_hard_links_extended_attributes_and_device_files(tmp_path):
+    """The copy, as the backend runs it, on real files: a layer's hard links stay one file, and the extended attribute
+    overlayfs marks an opaque folder with survives (trusted.* is root's alone, so here a user.* one stands for it; the
+    flags that copy one copy the other). Plain -a dropped both."""
+    src, dst = tmp_path / "data", tmp_path / "clean"
+    (src / "layer" / "opaque").mkdir(parents=True)
+    (src / "layer" / "perl").write_text("#!perl\n")
+    os.link(src / "layer" / "perl", src / "layer" / "perl5.38")
+    try:
+        os.setxattr(src / "layer" / "opaque", "user.overlay.opaque", b"y")
+    except OSError:
+        pytest.skip("this filesystem keeps no extended attributes")
+    cfg = {**k3s.settings(), "snapshot_keep": ["content/"]}
+    subprocess.run(["sh", "-c", f"mkdir -p {dst} && {k3s._mirror(cfg, str(src), str(dst))}"], check=True)
+    assert os.stat(dst / "layer" / "perl").st_ino == os.stat(dst / "layer" / "perl5.38").st_ino
+    assert os.getxattr(dst / "layer" / "opaque", "user.overlay.opaque") == b"y"
+    (dst / "layer" / "perl").write_text("changed in a chapter\n")                 # and a restore puts it back
+    subprocess.run(["sh", "-c", k3s._mirror(cfg, str(src), str(dst))], check=True)
+    assert (dst / "layer" / "perl5.38").read_text() == "#!perl\n"
 
 
 # ---------------------------------------------------------------- installing, checked by SHA-256
@@ -340,11 +374,12 @@ def test_each_chapter_starts_from_the_clean_snapshot(tmp_path, book_root):
     book, host, backend = setup(tmp_path, book_root)
     ws = backend.start(book, "first-deployment")
     scripts = host.scripts()
+    assert scripts[0] == k3s.tools_script(backend.tools())                    # the machine's tools, before anything
     wipe = next(i for i, s in enumerate(scripts) if s == k3s.wipe_script(backend.cfg))
     snap = scripts.index(k3s.snapshot_script(backend.cfg))
-    restore = scripts.index(k3s.restore_script(backend.cfg))
-    assert wipe < snap < restore                              # installed fresh, Ready once and kept, then restored
-    assert scripts[restore - 1] == k3s.killall_script(backend.cfg)
+    assert wipe < snap                                        # installed fresh, Ready once and kept
+    # the data dir is the clean copy as it is: the first chapter starts from it with no restore
+    assert scripts[snap + 1:] == [k3s.killall_script(backend.cfg)] and k3s.restore_script(backend.cfg) not in scripts
     assert ws.env["PATH"].startswith(str(tmp_path / "tools") + ":")
     assert Path(ws.env["KUBECONFIG"]).read_text().startswith("apiVersion: v1")
     assert (ws.cwd / "manifests" / "web-deployment.yaml").exists() and not list(ws.cwd.glob("*.sh"))
@@ -400,36 +435,50 @@ def test_each_chapters_peak_memory_is_reported(tmp_path, book_root):
 # ---------------------------------------------------------------- a machine image of the stack (bake)
 
 
-def test_the_node_s_own_state_goes_and_containerd_s_store_stays():
+def test_a_bake_leaves_out_only_the_first_start_s_logs_and_keeps_the_cluster():
     cfg = k3s.settings()
-    text = k3s.node_state_script(cfg)
-    gone = text.splitlines()[1]
-    for path in ("/var/lib/rancher/k3s/server", "/var/lib/re-k3s/clean", "/etc/rancher/node", "/var/lib/kubelet",
-                 "/var/lib/cni", "/var/log/pods", "/var/log/containers"):
-        assert f" {path}" in gone, path                       # the datastore, TLS, tokens, node password, kubelet
-    assert "find /var/lib/rancher/k3s/agent -mindepth 1 -maxdepth 1 ! -name containerd -exec rm -rf {} +" in text
-    assert "rm -rf /var/lib/rancher/k3s/agent " not in text and "/var/lib/rancher/k3s/data" not in text
+    text = k3s.image_logs_script(cfg)
+    assert "rm -rf /var/log/pods /var/log/containers" in text
+    assert "rm -f /var/lib/rancher/k3s/agent/containerd/containerd.log" in text
+    for kept in ("/var/lib/rancher/k3s/server", "/etc/rancher/node", "/var/lib/kubelet", "/var/lib/re-k3s/clean"):
+        assert kept not in text, kept                          # the datastore, TLS, tokens, node password, the copy
 
 
-def test_a_bake_imports_the_stack_until_every_image_is_there_then_leaves_nothing_of_this_node(tmp_path, book_root):
+def test_a_bake_imports_the_stack_until_every_image_is_there_then_keeps_the_cluster_and_its_clean_copy(tmp_path, book_root):
     book, host, backend = setup(tmp_path, book_root, block_network=True, cfg={"as_user": ["sudo", "-n", "--"]})
     host.ctr_images = "docker.io/rancher/mirrored-pause:3.6\ndocker.io/library/nginx:1.27.3\n"
+    host.du = {"/var/lib/rancher/k3s": 6_300_000_000, "/var/lib/re-k3s/clean": 3_900_000_000}
     made = backend.bake()
-    assert made == {"stack": backend.pinned.digest(), "k3s": "v1.31.4+k3s1", "ready_seconds": 0.0, "images": 1}
+    assert made == {"stack": backend.pinned.digest(), "k3s": "v1.31.4+k3s1", "ready_seconds": 0.0, "images": 1,
+                    "data_bytes": 6_300_000_000, "clean_bytes": 3_900_000_000}
     scripts = host.scripts()
     cfg = backend.cfg
+    assert scripts[0] == k3s.tools_script(backend.tools()) and "sudo" in backend.tools()
     assert scripts.index(k3s.wipe_script(cfg)) < scripts.index(k3s.fence_script(cfg))       # installed as prepare does
-    assert scripts[-3:] == [k3s.killall_script(cfg), k3s.node_state_script(cfg), k3s.fence_script(cfg, remove=True)]
-    assert k3s.snapshot_script(cfg) not in scripts                                      # no clean copy in the image
+    assert scripts[-4:] == [k3s.killall_script(cfg), k3s.image_logs_script(cfg), k3s.snapshot_script(cfg),
+                            k3s.fence_script(cfg, remove=True)]                 # the clean copy, in the image
     assert (tmp_path / "machine" / "var/lib/rancher/k3s/agent/images/stack-000.tar").exists()   # imported as k3s starts
     assert ["systemctl", "start", "re-k3s"] in host.ran()
+
+
+def test_a_machine_without_a_tool_the_backend_runs_says_which_before_anything_changes(tmp_path, book_root):
+    book, host, backend = setup(tmp_path, book_root)
+    host.missing = {"rsync", "iptables-save"}
+    for go in (backend.prepare, backend.bake, lambda: backend.start(book, "first-deployment")):
+        with pytest.raises(commands.CommandsError, match=r"this machine lacks rsync, iptables-save, which the k3s "
+                                                         r"backend runs \(\[k3s\] host_tools\): install them first"):
+            go()
+    assert host.scripts() == [k3s.tools_script(backend.tools())] * 3 and not host.fetched
+    assert backend.tools() == k3s.settings()["host_tools"]                     # no own user here: no sudo to check
+    text = k3s.tools_script(["rsync", "ip"])
+    assert text == 'for t in rsync ip; do command -v "$t" >/dev/null 2>&1 || echo "$t"; done\n'
 
 
 def test_a_bake_that_s_ready_without_the_stack_s_images_fails(tmp_path, book_root):
     book, host, backend = setup(tmp_path, book_root, cfg={"ready_seconds": 5})
     with pytest.raises(commands.CommandsError, match="Ready without the stack's docker.io/library/nginx:1.27.3"):
         backend.bake()
-    assert k3s.node_state_script(backend.cfg) not in host.scripts()
+    assert k3s.snapshot_script(backend.cfg) not in host.scripts()
 
 
 def test_a_machine_from_the_stack_s_image_installs_nothing_and_starts_from_what_it_holds(tmp_path, book_root, monkeypatch):
@@ -446,11 +495,24 @@ def test_a_machine_from_the_stack_s_image_installs_nothing_and_starts_from_what_
     later = [c for c in host.calls[n:]]
     scripts = [c[1] for c in later if c[0] == "script"]
     assert k3s.wipe_script(baked.cfg) not in scripts and not [c for c in later if c[0] in ("install", "write")]
-    assert ["test", "-d", "/var/lib/rancher/k3s/agent/containerd"] in [c[2] for c in later if c[0] == "run"]
-    snap = scripts.index(k3s.snapshot_script(baked.cfg))       # Ready once, kept, then a start from the copy, as before
-    assert scripts[snap + 1:snap + 3] == [k3s.killall_script(baked.cfg), k3s.restore_script(baked.cfg)]
+    runs = [c[2] for c in later if c[0] == "run"]
+    for held in (["test", "-d", "/var/lib/rancher/k3s/agent/containerd"], ["test", "-d", "/var/lib/re-k3s/clean/server"],
+                 ["test", "-f", "/etc/rancher/node/password"]):
+        assert held in runs                                    # the store, the image's clean copy, the node's password
+    # nothing copied at the start: the image's data dir is its clean copy, so k3s starts from it as it is
+    assert k3s.snapshot_script(baked.cfg) not in scripts and k3s.restore_script(baked.cfg) not in scripts
+    assert scripts == [k3s.tools_script(baked.tools()), k3s.killall_script(baked.cfg)]
+    assert "first start" not in baked.describe()["ready_seconds"]
     assert len(host.fetched) == fetched and baked.describe()["from_image"] is True
     baked.stop(ws)
+    n = len(host.scripts())
+    baked.stop(baked.start(book, "scale-and-serve"))            # every later start restores, as before
+    assert host.scripts()[n:n + 2] == [k3s.killall_script(baked.cfg), k3s.restore_script(baked.cfg)]
+    # an image without the clean copy (made before the bake kept one) never starts as if it had it
+    host.absent = {"/var/lib/re-k3s/clean/server"}
+    with pytest.raises(commands.CommandsError, match=r"no clean copy of its cluster \(/var/lib/re-k3s/clean/server\)"):
+        k3s.K3sBackend(book, block_network=False, host=host, cfg=backend.cfg, images=images).prepare()
+    host.absent = set()
     # an image of another stack, or one whose k3s isn't the pinned file, never starts this book's cluster
     monkeypatch.setenv(k3s.BAKED, "0" * 64)
     other = k3s.K3sBackend(book, block_network=False, host=host, cfg=backend.cfg, images=images)

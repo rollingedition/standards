@@ -157,6 +157,13 @@ as_user = ["sudo", "-n", "-E", "-u", "{user}", "--"]
 cache = "~/.cache/re-stack"
 images_tools = ["skopeo", "docker"]       # `re-check stack --images` exports each image by digest with the first found
 fence_chain = "RE-FENCE"                  # iptables: the steps' processes and the pods reach only the cluster
+# What the backend runs on the machine itself, checked before anything changes, so a machine without one says which at
+# once rather than failing later: the clean copy (rsync), the fence and k3s's own clean-up (iptables, ip6tables and
+# their -save and -restore), the pods' links and namespaces (ip) and k3s's unit (systemctl). Minimal OS images can lack
+# rsync and iptables; GitHub's ubuntu-24.04 runner has them all. The first word of as_user, the steps' own command, is
+# checked too while the steps run as their own user.
+host_tools = ["rsync", "iptables", "iptables-save", "iptables-restore", "ip6tables", "ip6tables-save",
+              "ip6tables-restore", "ip", "systemctl"]
 
 # A book's Lab and its stack: book.toml's [lab], examples/stack.in.toml, which the author writes, and examples/stack.toml,
 # which `re-check stack --pin` generates from it, every file by URL and SHA-256 and every image by digest (stack.py).

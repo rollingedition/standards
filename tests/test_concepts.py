@@ -112,6 +112,16 @@ def test_every_relation_type_says_what_it_means_and_how_it_maps_onto_skos():
     assert {n for n, s in types.items() if s.get("reserved") == "organization"} == {"maps-to", "defined-by-organization"}
 
 
+def test_the_vocabulary_names_every_property_served_records_use_that_schema_org_and_skos_lack():
+    data = concepts.settings()
+    own = set(data["vocabulary"])
+    assert own == {"formula", "appliesTo", "example", "firstEdition", "changedEdition"} and all(data["vocabulary"].values())
+    properties = [spec["property"] for spec in data["relations"].values()]
+    assert len(set(properties)) == len(properties) and not own & set(properties)      # one name, one meaning
+    doc = concepts.served.__doc__
+    assert all(f"the vocabulary's {name}" in doc for name in ("formula", "appliesTo", "example"))
+
+
 def test_the_format_says_what_it_cant_read(tmp_path):
     found = problems(sampler(tmp_path, toml='''context = "search-and-recommendation"
 colour = "blue"
@@ -130,7 +140,7 @@ synonyms = ["y"]
 wikidata = "2539"
 '''))
     assert found == [
-        "concepts.toml: unknown keys: colour; it holds context, [namespace], [[contexts]] and [[concepts]]",
+        "concepts.toml: unknown keys: colour; it holds context, [namespace], [[contexts]], [[concepts]] and [retired]",
         "concepts.toml:4: Not An ID: a concept's ID is lowercase words joined by hyphens, at most 64 characters",
         "concepts.toml:10: no-term: unknown keys: synonyms",
         "concepts.toml:10: no-term: needs term",
@@ -464,9 +474,11 @@ def test_served_gives_each_concept_its_addresses_versions_edition_and_provenance
     assert ndcg["context_address"] == f"{base}/search-and-recommendation" and ndcg["namespace"] == "rollingedition"
     assert ndcg["applies_to"] == [{"package": "scikit-learn", "version": "1.7.2"}]
     assert (ndcg["edition"], ndcg["first_edition"], ndcg["changed_edition"]) == ("2026.11.8", "2026.10.1", "2026.11.3")
-    assert ndcg["section"] == {"id": "ndcg", "chapter": "graded-gains", "title": "Normalize by the ideal ranking"}
+    assert ndcg["section"] == {"id": "ndcg", "chapter": "graded-gains", "title": "Normalize by the ideal ranking",
+                               "link": None}
     assert ndcg["provenance"] == {"book": "concepts-sampler", "file": "concepts.toml", "section": "ndcg",
-                                  "edition": "2026.11.8", "commit": "a" * 40, "checked_by": "re-check concepts"}
+                                  "edition": "2026.11.8", "commit": "a" * 40, "checked_by": "re-check concepts",
+                                  "checked_at": None}
     assert {"type": "implemented-by", "skos": None, "property": "implementedBy", "package": "scikit-learn",
             "versions": ">=1.5", "version": "1.7.2"} in ndcg["relations"]
     assert {"type": "computed-from", "skos": "skos:related", "property": "computedFrom",
@@ -520,13 +532,176 @@ applies_to = ["{tool}"]
     assert concepts.served(book, "2026.11.1")[0]["applies_to"] == [{"package": tool, "version": pins[tool]}]
 
 
+def test_served_gives_each_section_its_permanent_link_and_the_check_its_time():
+    book = bookfmt.load_book(SAMPLER)
+    records = concepts.served(book, "2026.11.8", commit="b" * 40, link=lambda unit: f"https://example.com/s/{unit}",
+                              checked_at="2026-11-19T08:00:00Z")
+    ndcg = next(r for r in records if r["id"] == "ndcg")
+    assert ndcg["section"]["link"] == "https://example.com/s/ndcg"
+    assert ndcg["provenance"]["checked_at"] == "2026-11-19T08:00:00Z"
+    opening = next(r for r in records if r["id"] == "relevance")          # defined in a chapter's opening
+    assert opening["section"] == {"id": "scoring-a-ranking", "chapter": "scoring-a-ranking", "title": "Scoring a ranking",
+                                  "link": "https://example.com/s/scoring-a-ranking"}
+
+
+# ---------------------------------------------------------------- an edition's records, and the next one's
+
+
+def edition(book, name, previous=None):
+    return concepts.edition_record(book, name, concepts.carry(concepts.served(book, name), previous))
+
+
+def test_carry_keeps_a_concept_s_first_edition_and_moves_its_changed_edition_only_when_its_meaning_changes(tmp_path):
+    first = edition(bookfmt.load_book(SAMPLER), "2026.11.1")
+    assert {(r["first_edition"], r["changed_edition"]) for r in first["concepts"]} == {("2026.11.1", "2026.11.1")}
+    same = edition(bookfmt.load_book(SAMPLER), "2026.11.2", first["concepts"])
+    assert {(r["first_edition"], r["changed_edition"]) for r in same["concepts"]} == {("2026.11.1", "2026.11.1")}
+    # nDCG's alias and the discount's relation change; the gain's section moves without its words, which is no change
+    book = sampler(tmp_path, edit=[('aliases = ["nDCG", "nDCG@k"]', 'aliases = ["nDCG", "nDCG@k", "NDCG"]'),
+                                   ('part-of = ["dcg"]', 'part-of = ["dcg"]\nprerequisite-of = ["ndcg"]')])
+    third = edition(book, "2026.11.3", same["concepts"])
+    changed = {r["id"]: (r["first_edition"], r["changed_edition"]) for r in third["concepts"]}
+    assert changed["ndcg"] == changed["discount"] == ("2026.11.1", "2026.11.3")
+    assert changed["dcg"] == ("2026.11.1", "2026.11.1")
+    fourth = edition(book, "2026.11.4", third["concepts"])
+    assert {r["id"]: r["changed_edition"] for r in fourth["concepts"]}["ndcg"] == "2026.11.3"   # kept, once changed
+    ndcg = next(r for r in third["concepts"] if r["id"] == "ndcg")
+    moved = dict(ndcg, section={"id": "elsewhere"}, edition="2027.1.1", example=None,
+                 applies_to=[{"package": "scikit-learn", "version": "9.9"}])
+    assert concepts.meaning(moved) == concepts.meaning(ndcg)            # where and at which version: not its meaning
+    assert concepts.meaning(dict(ndcg, applies_to=[])) != concepts.meaning(ndcg)
+
+
+def test_an_edition_stores_its_records_and_retired_addresses_and_only_the_addresses_are_public():
+    book = bookfmt.load_book(SAMPLER)
+    record = edition(book, "2026.11.8")
+    base = "https://rollingedition.com/concepts/search-and-recommendation"
+    assert record["book"] == "concepts-sampler" and record["edition"] == "2026.11.8" and len(record["concepts"]) == 9
+    assert record["retired"] == {f"{base}/normalized-gain": f"{base}/ndcg"}
+    public = concepts.addresses(record)
+    assert public == {"schema": 1, "book": "concepts-sampler", "edition": "2026.11.8",
+                      "addresses": sorted(r["address"] for r in record["concepts"]), "retired": record["retired"]}
+    assert "definition" not in str(public)
+    for shape in (record, public):
+        got = concepts.released(shape)
+        assert got.edition == "2026.11.8" and got.retired == record["retired"]
+        assert got.addresses == {r["address"] for r in record["concepts"]}
+    assert concepts.released({"nothing": 1}) is None and concepts.released(None) is None
+
+
+# ---------------------------------------------------------------- frozen addresses
+
+
+def released_with(*extra: str, retired: dict | None = None, edition_name: str = "2026.11.8"):
+    record = edition(bookfmt.load_book(SAMPLER), edition_name)
+    public = concepts.addresses(record)
+    public["addresses"] += [f"https://rollingedition.com/concepts/{a}" for a in extra]
+    public["retired"].update(retired or {})
+    return concepts.released(public)
+
+
+def test_a_released_concept_s_address_never_goes_and_a_retired_one_stays_retired(tmp_path):
+    book = bookfmt.load_book(SAMPLER)
+    assert concepts.check(book, previous=released_with()) == ([], [])
+    gone = sampler(tmp_path / "gone", edit=('id = "discount"', 'id = "the-discount"'))
+    found = problems_with(gone, released_with())
+    assert found == ["concepts.toml: W-78: search-and-recommendation/discount was released in Edition 2026.11.8, and a "
+                     "concept's address is permanent (https://rollingedition.com/concepts/search-and-recommendation/"
+                     "discount): keep its context and ID, or retire it to the concept that replaces it, as "
+                     "\"search-and-recommendation/discount\" = \"…\" under [retired]"]
+    retired = sampler(tmp_path / "retired", edit=[('id = "discount"', 'id = "the-discount"'),
+                                                 ('"normalized-gain" = "ndcg"',
+                                                  '"normalized-gain" = "ndcg"\n"discount" = "the-discount"')])
+    assert problems_with(retired, released_with()) == []
+    # the edition before had retired an address this one drops from [retired]
+    unretired = sampler(tmp_path / "unretired", edit=('"normalized-gain" = "ndcg"', ''))
+    assert [p.split(" was released")[0] for p in problems_with(unretired, released_with())] == [
+        "concepts.toml: W-78: search-and-recommendation/normalized-gain"]
+    # one the edition before had retired may come back as a concept
+    back = sampler(tmp_path / "back", edit=('"normalized-gain" = "ndcg"', ''))
+    assert problems_with(back, released_with(retired={
+        "https://rollingedition.com/concepts/search-and-recommendation/ranking-metric":
+        "https://rollingedition.com/concepts/search-and-recommendation/ndcg"})) == \
+        [p for p in problems_with(back, released_with()) if "normalized-gain" in p]
+    # a book that loses its concepts.toml after releasing them keeps the addresses too
+    lost = sampler(tmp_path / "lost")
+    (lost.root / concepts.FILE).unlink()
+    lost = bookfmt.load_book(lost.root)
+    found, _ = concepts.check(lost, previous=released_with())
+    assert len(found) == 10 and all("a concept's address is permanent" in p for p in found)
+
+
+def problems_with(book, previous):
+    return concepts.check(book, previous=previous)[0]
+
+
+def test_retired_names_a_successor_the_book_defines_and_never_a_concept_it_still_has(tmp_path):
+    book = sampler(tmp_path, edit=('"normalized-gain" = "ndcg"',
+                                   '"normalized-gain" = "nothing-here"\n"dcg" = "ndcg"\n"elsewhere/x" = "ndcg"\n'
+                                   '"Bad ID" = "ndcg"'))
+    assert problems(book) == [
+        "concepts.toml: [retired] 'Bad ID': a retired concept and its successor are each an ID in the file's context, "
+        "or context/ID",
+        "concepts.toml: [retired] search-and-recommendation/normalized-gain: W-78: its successor "
+        "search-and-recommendation/nothing-here isn't a concept here: a retired concept's address goes to one this book "
+        "defines",
+        "concepts.toml: [retired] search-and-recommendation/dcg: W-78: it's retired and defined here too: take it out of "
+        "[retired], since its address is a concept again",
+        "concepts.toml: [retired] elsewhere/x: W-78: 'elsewhere' isn't a context: a taxonomy area or skill, or one declared here"]
+    assert problems(sampler(tmp_path / "table", edit=[('[retired]\n"normalized-gain" = "ndcg"', ''),
+                                                      ('context = "search-and-recommendation"',
+                                                       'retired = "ndcg"\ncontext = "search-and-recommendation"')])) == [
+        "concepts.toml: [retired] maps each retired concept to its successor, such as \"recall\" = \"recall-at-k\""]
+
+
+def test_no_context_may_take_the_vocabulary_s_address(tmp_path):
+    assert concepts.vocabulary_segment() == "vocabulary"
+    found = problems(sampler(tmp_path, edit=('id = "graded-relevance"\nbroader', 'id = "vocabulary"\nbroader')))
+    assert ("concepts.toml:7: vocabulary is the address of our vocabulary, "
+            "https://rollingedition.com/concepts/vocabulary#, so no context may take it") in found
+
+
+def test_the_command_line_reads_the_edition_before_from_its_addresses_its_record_or_beside_its_sections(tmp_path, capsys):
+    record = edition(bookfmt.load_book(SAMPLER), "2026.11.8")
+    record["concepts"].append(dict(record["concepts"][0], address="https://rollingedition.com/concepts/"
+                                                                  "search-and-recommendation/gone"))
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "sections.json").write_text("{}")
+    (bundle / "concepts.json").write_text(__import__("json").dumps(record))
+    public = tmp_path / "concept-addresses.json"
+    public.write_text(__import__("json").dumps(concepts.addresses(record)))
+    for source in (str(bundle / "sections.json"), str(bundle / "concepts.json"), str(public)):
+        assert cli.main(["concepts", "--book", str(SAMPLER), "--previous", source]) == 1
+        assert "search-and-recommendation/gone was released in Edition 2026.11.8" in capsys.readouterr().err
+    ok = tmp_path / "ok.json"
+    ok.write_text(__import__("json").dumps(concepts.addresses(edition(bookfmt.load_book(SAMPLER), "2026.11.8"))))
+    assert cli.main(["concepts", "--book", str(SAMPLER), "--previous", str(ok)]) == 0
+    assert "every address Edition 2026.11.8 released still answers" in capsys.readouterr().out
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    (empty / "sections.json").write_text("{}")                   # an edition before concepts: nothing beside it
+    for source in (str(empty / "sections.json"), "none"):
+        assert cli.main(["concepts", "--book", str(SAMPLER), "--previous", source]) == 0
+        assert "no released edition with concepts yet" in capsys.readouterr().out or source == "none"
+    assert checks.latest_concepts_url("concepts-sampler") == \
+        "https://rollingedition.ai/books/concepts-sampler/latest/concept-addresses.json"
+
+
+def test_a_book_without_concepts_fetches_nothing_for_latest(tmp_path, monkeypatch, capsys):
+    book = bookfmt.load_book(make_book(tmp_path / "tiny"))
+    monkeypatch.setattr(checks, "load_previous_manifest", lambda source: pytest.fail(f"fetched {source}"))
+    assert cli.main(["concepts", "--book", str(book.root), "--previous", "latest"]) == 0
+    assert "no concepts.toml" in capsys.readouterr().out
+
+
 # ---------------------------------------------------------------- the checks' place
 
 
 def test_the_book_checks_workflow_runs_it_and_a_change_to_concepts_alone_rides_along():
     flow = yaml.safe_load((standards_root() / ".github" / "workflows" / "book-checks.yml").read_text())
     runs = [s.get("run", "") for s in flow["jobs"]["manifest"]["steps"]]
-    assert "re-check concepts --book ." in runs
+    assert 're-check concepts --book . --previous "${RE_PREVIOUS_SECTIONS:-latest}"' in runs
     with open(data_path("review-tiers.toml"), "rb") as f:
         assert tomllib.load(f)["files"]["concepts"] == [concepts.FILE]
     assert checks.rides_along([concepts.FILE]) and checks.check_kind_label([], [concepts.FILE]) == []

@@ -454,12 +454,21 @@ def cmd_concepts(args) -> int:
     relation types (W-77 to W-80). A book without one passes."""
     book = bookfmt.load_book(Path(args.book))
     cs = book.concepts
+    source = args.previous
+    if not cs.present and source == "latest":
+        source = None               # nothing to fetch for a book without concepts: its release checks a lost file
+    data, note = checks.load_previous_concepts(source, book.slug) if source else (None, "")
+    previous = concepts.released(data)
     if not cs.present:
-        return report("Concepts", [], f"no {concepts.FILE}: the book indexes no concepts yet, so there's nothing to check")
-    problems, notes = concepts.check(book, catalog.load_taxonomy(taxonomy_path(args)))
+        problems = concepts.frozen_problems(cs, previous)
+        return report("Concepts", problems, f"no {concepts.FILE}: the book indexes no concepts yet, so there's nothing "
+                                            "to check")
+    problems, notes = concepts.check(book, catalog.load_taxonomy(taxonomy_path(args)), previous)
     n_relations = sum(len(c.relations) for c in cs)
+    since = (f"; every address Edition {previous.edition} released still answers" if previous else
+             f" ({note})" if note else "")
     rc = report("Concepts", problems, f"{len(cs)} concept(s) in {len({c.context for c in cs})} context(s), each "
-                f"definition quoted from its section, with {n_relations} relation(s) of the fixed types")
+                f"definition quoted from its section, with {n_relations} relation(s) of the fixed types{since}")
     if notes:
         report("Concepts, terms used before their definition", notes, "", warn=True)
     return 1 if notes and args.strict else rc
@@ -687,6 +696,9 @@ def build_parser() -> argparse.ArgumentParser:
                                       "checkout)")
     s.add_argument("--strict", action="store_true", help="exit 1 when a term is used before its definition with no link, "
                                                         "which otherwise is listed and passes")
+    s.add_argument("--previous", help="the previous edition, whose concepts' addresses are permanent: `latest`, its "
+                                      "machine copy's; a path or URL to its addresses or its record; its sections.json's "
+                                      "path, beside which its record is; or `none`")
     s.set_defaults(fn=cmd_concepts)
 
     s = sub.add_parser("narration", help="the spoken script: terms no rule reads, and examples, blocks and tables with no "

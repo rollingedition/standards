@@ -114,3 +114,7 @@ example = "ndcg-by-hand"
 [concepts.relations]
 computed-from = ["dcg"]
 implemented-by = [{ to = "scikit-learn", versions = ">=1.5" }]
+
+# A concept an earlier edition released and the book no longer defines: its address goes to the one that replaced it
+[retired]
+"normalized-gain" = "ndcg"

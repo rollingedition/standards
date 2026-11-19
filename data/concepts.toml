@@ -115,6 +115,15 @@ property = "definedByOrganization"
 target = "organization"
 reserved = "organization"
 
+# Our vocabulary's own properties, at [addresses] vocabulary, beside the relation types' (each type's `property`): what
+# a served concept says that schema.org and SKOS have no word for (concepts.served). Each is what the property holds.
+[vocabulary]
+formula = "the concept's formula, in the book's own notation, quoted from the section that defines it"
+appliesTo = "a package or tool the definition depends on, at the version the edition pins and runs its examples on"
+example = "the book's example that shows the concept, run on every release"
+firstEdition = "the edition of the book the concept was first defined in"
+changedEdition = "the edition of the book in which its meaning last changed: its words, its relations or what it applies to"
+
 # How a term's use is found in a chapter before its defining section (W-79), kept conservative so a match is a real
 # use: whole words only, with these characters counted as part of a word, so "nDCG@10" and "BM25-scored" aren't uses
 # of nDCG or BM25. A term with a capital after its first letter, such as BM25 or nDCG, matches only as written; any

@@ -86,9 +86,10 @@ jobs:
         run: re-check addressed --book . --base-ref "$BASE_SHA"
       - name: Check the agent skill's procedures
         run: re-check skill --book . --base-ref "$BASE_SHA"
-      # A book without concepts.toml passes. A term used before its definition with no link is listed, not failed.
-      - name: Check the concepts against the book's text
-        run: re-check concepts --book .
+      # A book without concepts.toml passes. A term used before its definition with no link is listed, not failed. A
+      # released concept's address is permanent: each one the latest edition listed is still a concept, or retired.
+      - name: Check the concepts against the book's text and the latest edition
+        run: re-check concepts --book . --previous "${RE_PREVIOUS_SECTIONS:-latest}"
 
   section-ids:
     name: section-ids

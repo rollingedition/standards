@@ -66,10 +66,11 @@ def generated_only(paths: list[str]) -> bool:
 
 
 def rides_along(paths: list[str]) -> bool:
-    """Whether a change touches nothing but files that ride with the next edition: the narration files, the agent
-    skill's procedures, an authored book's voice.toml, the book's concepts and the generated repository files
-    (generated_only). None is on the page, so such a change needs no kind label and cuts no edition of its own. (Adding
-    skill.md where the last edition had none does cut one: the release checks that, since it knows the edition.)"""
+    """Whether a change touches nothing but files that need no kind label: the narration files, the agent skill's
+    procedures, an authored book's voice.toml, the book's concepts and the generated repository files (generated_only).
+    None is in a chapter, so whoever opens such a change needs no kind label, and most ride with the next edition.
+    (Adding skill.md where the last edition had none does cut one, and so does any change to the concepts once they're
+    served on a Glossary page: triage gives it its kind, and the release cuts the edition, since they know the book.)"""
     if not paths:
         return False
     names = generated_names()
@@ -149,6 +150,29 @@ def load_previous_manifest(source: str | None) -> tuple[dict | None, str]:
     if not p.exists():
         return None, "no released edition yet"
     return json.loads(p.read_text(encoding="utf-8")), f"previous edition from {p.name}"
+
+
+CONCEPT_ADDRESSES = "concept-addresses.json"   # beside a released edition's sections.json on rollingedition.ai
+CONCEPTS_RECORD = "concepts.json"               # in an edition's bundle, beside its sections.json
+
+
+def latest_concepts_url(slug: str) -> str:
+    """The latest edition's concepts' addresses, which its machine copy lists: the addresses and the retired ones, never
+    their definitions."""
+    origin = os.environ.get("RE_AI_ORIGIN", "https://rollingedition.ai")
+    return f"{origin}/books/{slug}/latest/{CONCEPT_ADDRESSES}"
+
+
+def load_previous_concepts(source: str | None, slug: str) -> tuple[dict | None, str]:
+    """The concepts the previous edition released, as concepts.released reads them: `latest`, its machine copy's
+    addresses; a path or URL to them, or to the edition's own record; or the path to the edition's sections.json, beside
+    which its record is. None, with why, when there's no edition yet, or the edition had no concepts."""
+    if source == "latest":
+        source = latest_concepts_url(slug)
+    elif source and not source.startswith(("http://", "https://")) and Path(source).name == "sections.json":
+        source = str(Path(source).with_name(CONCEPTS_RECORD))
+    found, note = load_previous_manifest(source)
+    return found, note if found is not None else "no released edition with concepts yet"
 
 
 def scratch() -> tempfile.TemporaryDirectory:

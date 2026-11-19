@@ -28,6 +28,9 @@ drift. The checks hold the index to the text.
     contrasts-with = ["precision-at-k"]
     implemented-by = [{ to = "scikit-learn", versions = ">=1.5" }]
 
+    [retired]                                  # a released concept the book no longer defines, to its successor
+    "recall" = "recall-at-k"                   # an ID in the file's context, or context/ID, on either side
+
 Contexts are namespaces. Ours are the taxonomy's areas and skills (data/taxonomy.json), and the narrower contexts books
 declare; a concept's permanent address is `{base}/{context}/{id}`, and its version in one edition `…/{id}@{edition}`
 (data/concepts.toml, [addresses]). An organization's file has the same format with a [namespace] table naming its own
@@ -52,7 +55,14 @@ The checks, each a function a later check composes with:
 6. relation_problems (W-80): every relation's type is in the set and names a concept that exists here, or a
    well-formed address in another context, and no acyclic type goes round in a circle.
 
-`served` gives each concept in the shape it's served in, with its generated fields.
+Frozen addresses: once an edition is released, each of its concepts' addresses is permanent, as a section's ID is.
+frozen_problems holds a book's concepts.toml to the edition before (`released`, read from that edition's records or
+the addresses its machine copy lists): every address it had is still a concept here, or retired under [retired] to a
+successor this file defines, and every address it had retired stays retired or comes back.
+
+`served` gives each concept in the shape it's served in, with its generated fields; `carry` gives each its first edition
+and the edition its meaning last changed in, from the edition before's records; `edition_record` is what an edition
+stores, and `addresses` the part of it that's public, for the check on a pull request.
 """
 from __future__ import annotations
 
@@ -73,7 +83,7 @@ from . import stack as stack_pins
 from .bookfmt import BINDING, Book, Chapter, new_markdown, valid_id
 
 FILE = "concepts.toml"
-FILE_KEYS = {"context", "namespace", "contexts", "concepts"}
+FILE_KEYS = {"context", "namespace", "contexts", "concepts", "retired"}
 NAMESPACE_KEYS = {"id", "base"}
 CONTEXT_KEYS = {"id", "broader", "label", "description"}
 CONCEPT_KEYS = {"id", "term", "aliases", "definition", "formula", "section", "context", "relations", "applies_to",
@@ -161,6 +171,7 @@ class ConceptSet:
     context: str = ""                                          # the file's own default context, if it gives one
     contexts: dict[str, Context] = field(default_factory=dict)
     concepts: list[Concept] = field(default_factory=list)
+    retired: dict[tuple[str, str], tuple[str, str]] = field(default_factory=dict)   # (context, ID) -> its successor's
     problems: list[str] = field(default_factory=list)          # the format's problems: what stopped a part being read
 
     def __iter__(self) -> Iterator[Concept]:
@@ -188,6 +199,22 @@ class ConceptSet:
 
     def context_address(self, context: str) -> str:
         return settings()["addresses"]["context"].format(base=self.base, context=context)
+
+    def retired_addresses(self) -> dict[str, str]:
+        """Each retired concept's address, to its successor's: where the old address goes."""
+        return {self.address(*old): self.address(*new) for old, new in sorted(self.retired.items())}
+
+
+def _ref_key(ref, default: str) -> tuple[str, str] | None:
+    """A concept named in [retired], an ID in the file's context or context/ID, as (context, ID); None when it isn't."""
+    if not isinstance(ref, str):
+        return None
+    parts = ref.strip().split("/")
+    if len(parts) == 1 and default and valid_id(parts[0]):
+        return default, parts[0]
+    if len(parts) == 2 and all(valid_id(p) for p in parts):
+        return parts[0], parts[1]
+    return None
 
 
 def _strings(value, what: str, where: str, problems: list[str]) -> list[str]:
@@ -250,8 +277,8 @@ def parse(text: str, file: str = FILE) -> ConceptSet:
             lines[m.group(1)].append(n)
     problems = cs.problems
     if unknown := sorted(set(data) - FILE_KEYS):
-        problems.append(f"{file}: unknown keys: {', '.join(unknown)}; it holds context, [namespace], [[contexts]] and "
-                        "[[concepts]]")
+        problems.append(f"{file}: unknown keys: {', '.join(unknown)}; it holds context, [namespace], [[contexts]], "
+                        "[[concepts]] and [retired]")
 
     ns = data.get("namespace")
     if ns is not None:
@@ -339,6 +366,19 @@ def parse(text: str, file: str = FILE) -> ConceptSet:
         if concept.wikidata and not catalog.QID.match(concept.wikidata):
             problems.append(f"{where}: wikidata is an item's ID, such as Q2539")
         cs.concepts.append(concept)
+
+    raw_retired = data.get("retired", {})
+    if not isinstance(raw_retired, dict):
+        problems.append(f"{file}: [retired] maps each retired concept to its successor, such as \"recall\" = "
+                        "\"recall-at-k\"")
+        raw_retired = {}
+    for old, new in raw_retired.items():
+        o, n = _ref_key(old, cs.context), _ref_key(new, cs.context)
+        if o is None or n is None:
+            problems.append(f"{file}: [retired] {old!r}: a retired concept and its successor are each an ID in the file's "
+                            "context, or context/ID")
+            continue
+        cs.retired[o] = n
     return cs
 
 
@@ -467,6 +507,13 @@ def known_contexts(cs: ConceptSet, taxonomy: dict | None = None) -> set[str]:
     return declared | {t["id"] for t in tax["areas"] + tax["skills"]}
 
 
+def vocabulary_segment() -> str:
+    """The part of our vocabulary's address that sits where a context would ([addresses] vocabulary): `vocabulary`."""
+    cfg = settings()["addresses"]
+    path = cfg["vocabulary"].split("#")[0].rstrip("/")
+    return path[len(cfg["base"]) + 1:] if path.startswith(cfg["base"] + "/") else ""
+
+
 def context_problems(cs: ConceptSet, taxonomy: dict | None = None) -> list[str]:
     """Each declared context sits under a known one, in no circle and shadowing none of the taxonomy's; each concept
     is in a known context."""
@@ -478,6 +525,9 @@ def context_problems(cs: ConceptSet, taxonomy: dict | None = None) -> list[str]:
         where = cs.where(ctx.line)
         if ctx.id in ours:
             problems.append(f"{where}: {ctx.id} is already one of the taxonomy's areas and skills: use it, don't declare it")
+        elif cs.ours and ctx.id == vocabulary_segment():
+            problems.append(f"{where}: {ctx.id} is the address of our vocabulary, {settings()['addresses']['vocabulary']}, "
+                            "so no context may take it")
         elif not ctx.broader and not cs.ours:
             continue
         elif ctx.broader not in known:
@@ -562,6 +612,65 @@ def once_problems(cs: ConceptSet) -> list[str]:
                             "one concept")
         elif quote:
             quotes[quote] = c
+    return problems
+
+
+def retired_problems(cs: ConceptSet, known: set[str]) -> list[str]:
+    """[retired]: each retired concept is in a known context and isn't defined here too, and its successor is a concept
+    this file defines, so its old address always goes somewhere."""
+    live = {c.key for c in cs.concepts}
+    problems: list[str] = []
+    for old, new in cs.retired.items():
+        where = f"{cs.file}: [retired] {old[0]}/{old[1]}"
+        if old in live:
+            problems.append(f"{where}: W-78: it's retired and defined here too: take it out of [retired], since its address is "
+                            "a concept again")
+        elif old[0] not in known:
+            problems.append(f"{where}: W-78: {old[0]!r} isn't a context: a taxonomy area or skill, or one declared here")
+        if new not in live:
+            problems.append(f"{where}: W-78: its successor {new[0]}/{new[1]} isn't a concept here: a retired concept's address "
+                            "goes to one this book defines")
+    return problems
+
+
+@dataclass
+class Released:
+    """The concepts' addresses an edition released, and those it had retired, each to its successor's."""
+    edition: str
+    addresses: set[str]
+    retired: dict[str, str]
+
+
+def released(data) -> Released | None:
+    """An edition's concepts, as frozen_problems compares them: from what an edition stores (edition_record), or from
+    the addresses its machine copy lists (addresses). None for anything else."""
+    if not isinstance(data, dict):
+        return None
+    if isinstance(data.get("concepts"), list):
+        found = {r["address"] for r in data["concepts"] if isinstance(r, dict) and r.get("address")}
+    elif isinstance(data.get("addresses"), list):
+        found = {a for a in data["addresses"] if isinstance(a, str)}
+    else:
+        return None
+    retired = data.get("retired") if isinstance(data.get("retired"), dict) else {}
+    return Released(str(data.get("edition") or ""), found, {str(k): str(v) for k, v in retired.items()})
+
+
+def frozen_problems(cs: ConceptSet, previous: Released | None) -> list[str]:
+    """Frozen addresses: every concept the edition before released, and every one it had retired, is still a concept
+    here or retired under [retired], so its address never stops answering."""
+    if previous is None:
+        return []
+    live = {cs.address(*c.key) for c in cs.concepts} if cs.present else set()
+    retired = set(cs.retired_addresses()) if cs.present else set()
+    problems = []
+    for address in sorted((previous.addresses | set(previous.retired)) - live - retired):
+        context, _, cid = address.rpartition("/")
+        context = context.rpartition("/")[2]
+        edition = f"Edition {previous.edition}" if previous.edition else "the last edition"
+        problems.append(f"{cs.file}: W-78: {context}/{cid} was released in {edition}, and a concept's address is permanent "
+                        f"({address}): keep its context and ID, or retire it to the concept that replaces it, as "
+                        f"\"{context}/{cid}\" = \"…\" under [retired]")
     return problems
 
 
@@ -855,12 +964,13 @@ def link_problems(book: Book, cs: ConceptSet) -> list[str]:
 # ---------------------------------------------------------------- the check
 
 
-def check(book: Book, taxonomy: dict | None = None) -> tuple[list[str], list[str]]:
-    """(problems, notes) for a book's concepts.toml: the format, then checks 1, 2, 6 and 3 (W-77 to W-80). A book
-    without one has none of either. Notes are what [uses] lists rather than fails."""
+def check(book: Book, taxonomy: dict | None = None, previous: Released | None = None) -> tuple[list[str], list[str]]:
+    """(problems, notes) for a book's concepts.toml: the format, then checks 1, 2, 6 and 3 (W-77 to W-80), [retired],
+    and, given the edition before's concepts (`previous`), frozen addresses. A book without one has none of either,
+    unless an edition released concepts it no longer has. Notes are what [uses] lists rather than fails."""
     cs = book.concepts
     if not cs.present:
-        return [], []
+        return frozen_problems(cs, previous), []
     if not cs.ours:
         return [f"{cs.file}: a book's concepts are in our namespace; only an organization's file names its own"], []
     problems = list(cs.problems)
@@ -876,6 +986,8 @@ def check(book: Book, taxonomy: dict | None = None) -> tuple[list[str], list[str
     problems += pinned_problems(cs, book.pins, where_pinned)
     problems += example_problems(cs, live)
     problems += relation_problems(cs, known, book.pins)
+    problems += retired_problems(cs, known)
+    problems += frozen_problems(cs, previous)
     linked = link_problems(book, cs)
     if settings()["uses"].get("fails", True):
         return problems + linked, []
@@ -886,13 +998,16 @@ def check(book: Book, taxonomy: dict | None = None) -> tuple[list[str], list[str
 
 
 def served(book: Book, edition: str, changed: Mapping[str, Mapping[str, str]] | None = None,
-           commit: str | None = None) -> list[dict]:
+           commit: str | None = None, link: Callable[[str], str] | None = None,
+           checked_at: str | None = None) -> list[dict]:
     """Each concept of a book whose concepts pass `re-check concepts`, in the shape it's served in, with its generated
     fields: its addresses, the version each package it applies to is pinned at (Book.pins: examples/requirements.txt,
     or a terminal book's examples/stack.toml), the edition, and its provenance. Pure: the same book, edition and
     inputs give the same records. `changed` comes from the release records: each concept's first edition and the
     edition it last changed in, by address, as {"first": "2026.10.1", "changed": "2026.11.3"}; a concept it doesn't
-    name is new in this edition. `commit` is the commit the edition was cut from, when given.
+    name is new in this edition (`carry` works it out from the edition before's records). `commit` is the commit the
+    edition was cut from, `link` gives a section's or chapter's permanent link by its ID, and `checked_at` is when
+    `re-check concepts` passed on it (ISO 8601, UTC), each when given; None in the record when not.
 
     How it maps onto JSON-LD, as a node typed both schema:DefinedTerm and skos:Concept:
     - address: the node's @id; edition_address, the @id of this edition's version of it, dct:isVersionOf address
@@ -902,15 +1017,16 @@ def served(book: Book, edition: str, changed: Mapping[str, Mapping[str, str]] | 
     - id: schema:termCode and skos:notation
     - context, context_address: schema:inDefinedTermSet and skos:inScheme, a schema:DefinedTermSet that is also a
       skos:ConceptScheme, at context_address
-    - section: schema:subjectOf, the section of the book that defines it
+    - section: schema:subjectOf, the section of the book that defines it, at its permanent link (`link`)
     - applies_to: the vocabulary's appliesTo, each a schema:SoftwareApplication with schema:name and
       schema:softwareVersion, the version the edition pins
     - example: the vocabulary's example, the book's example that shows it
     - wikidata: schema:sameAs and skos:exactMatch, the item's entity address
     - relations: each its type's `skos` property, refined by the vocabulary's `property` (data/concepts.toml); a
       package's (implemented-by) a schema:SoftwareApplication with its pinned version and the range it holds within
-    - edition: schema:version; first_edition and changed_edition, the vocabulary's
-    - provenance: prov:wasDerivedFrom the section in the edition, at the commit, and prov:wasGeneratedBy the check
+    - edition: schema:version; first_edition and changed_edition, the vocabulary's firstEdition and changedEdition
+    - provenance: prov:wasDerivedFrom the section in the edition, at the commit, and prov:wasGeneratedBy the check,
+      ended at checked_at
     A relation's provenance is its concept's: the same file at the same edition and commit.
     """
     cs = book.concepts
@@ -953,7 +1069,8 @@ def served(book: Book, edition: str, changed: Mapping[str, Mapping[str, str]] | 
             "aliases": list(c.aliases),
             "definition": squash(" ".join(b.text for b in blocks(book.bind(c.definition)))),
             "formula": book.bind(c.formula) if c.formula else None,
-            "section": {"id": c.section, "chapter": chapter_id, "title": title},
+            "section": {"id": c.section, "chapter": chapter_id, "title": title,
+                        "link": link(c.section) if link else None},
             "applies_to": [{"package": name, "version": pins.get(package_key(name))} for name in c.applies_to],
             "example": c.example or None,
             "wikidata": cfg["addresses"]["wikidata"].format(qid=c.wikidata) if c.wikidata else None,
@@ -962,6 +1079,54 @@ def served(book: Book, edition: str, changed: Mapping[str, Mapping[str, str]] | 
             "first_edition": history.get("first", edition),
             "changed_edition": history.get("changed", history.get("first", edition)),
             "provenance": {"book": book.slug, "file": cs.file, "section": c.section, "edition": edition,
-                           "commit": commit, "checked_by": "re-check concepts"},
+                           "commit": commit, "checked_by": "re-check concepts", "checked_at": checked_at},
         })
     return out
+
+
+# What a concept means, as `carry` compares it between editions: its words, its relations and what it applies to. Where
+# it's defined, its example, its versions and its provenance can move without its meaning changing.
+MEANING = ("context", "id", "term", "aliases", "definition", "formula", "wikidata")
+
+
+def meaning(record: Mapping) -> tuple:
+    relations = sorted((r.get("type") or "", r.get("target") or r.get("package") or "", r.get("versions") or "")
+                       for r in record.get("relations") or [])
+    applies = sorted(a.get("package") or "" for a in record.get("applies_to") or [])
+    return tuple(str(record.get(k)) for k in MEANING), tuple(relations), tuple(applies)
+
+
+def carry(records: list[dict], previous: list[dict] | None) -> list[dict]:
+    """`served` records with each one's first edition and the edition its meaning last changed in carried from the
+    edition before's records (`previous`): a concept that was there keeps its first edition, and its changed edition
+    unless its meaning changed in this one; a concept that wasn't is new in this edition. Pure."""
+    before = {r["address"]: r for r in previous or [] if isinstance(r, dict) and r.get("address")}
+    out = []
+    for r in records:
+        p = before.get(r["address"])
+        if p is None:
+            out.append(dict(r, first_edition=r["edition"], changed_edition=r["edition"]))
+            continue
+        first = p.get("first_edition") or p.get("edition") or r["edition"]
+        same = meaning(p) == meaning(r)
+        out.append(dict(r, first_edition=first,
+                        changed_edition=(p.get("changed_edition") or first) if same else r["edition"]))
+    return out
+
+
+RECORD_SCHEMA = 1
+
+
+def edition_record(book: Book, edition: str, records: list[dict]) -> dict:
+    """What an edition stores of its concepts: every concept as `served` gives it (after `carry`), and the addresses it
+    has retired, each to its successor's. The site, the assistants' server and the next edition's check read it."""
+    return {"schema": RECORD_SCHEMA, "book": book.slug, "edition": edition, "concepts": records,
+            "retired": book.concepts.retired_addresses() if book.concepts.present else {}}
+
+
+def addresses(record: Mapping) -> dict:
+    """The public part of an edition's record, for the check on a pull request: its concepts' addresses and the ones it
+    retired, without their definitions."""
+    return {"schema": RECORD_SCHEMA, "book": record.get("book"), "edition": record.get("edition"),
+            "addresses": sorted(r["address"] for r in record.get("concepts") or []),
+            "retired": dict(sorted((record.get("retired") or {}).items()))}

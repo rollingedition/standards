@@ -18,8 +18,10 @@ skill = ["skill.md"]
 # An authored book's voice: how its drafting tools write, never on the page. Like narration, a change to it alone has no
 # kind of change and rides with the next edition; it's always the lead author's ([authors] lead_files).
 voice = ["voice.toml"]
-# The terms the book defines, each quoted from its chapters (concepts.toml, beside book.toml). Like skill.md they aren't on
-# the page, so a change to them alone has no kind of change and rides with the next edition; their checks still run.
+# The terms the book defines, each quoted from its chapters (concepts.toml, beside book.toml). They aren't in a chapter, so
+# whoever opens a change to them needs no kind label. Once they're served, on the book's Glossary page and to assistants,
+# what they say is new content: triage gives a change to them, the book's first concepts.toml included, the content kind,
+# and its merge cuts an edition. Until then a change to them alone rides with the next edition, as a later skill.md does.
 concepts = ["concepts.toml"]
 meta = ["book.toml", "redirects.yml", "CODEOWNERS", "renovate.json", "README.md", "CITATION.cff", "LICENSE",
         "LICENSE-CODE", ".gitignore", ".github/workflows/*"]

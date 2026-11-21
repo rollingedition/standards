@@ -175,5 +175,28 @@ def load_previous_concepts(source: str | None, slug: str) -> tuple[dict | None, 
     return found, note if found is not None else "no released edition with concepts yet"
 
 
+CONCEPT_LIBRARY = "/concepts/library.json"   # every released book's concepts on rollingedition.ai: check 4's
+
+
+def latest_library_url() -> str:
+    origin = os.environ.get("RE_AI_ORIGIN", "https://rollingedition.ai")
+    return f"{origin}{CONCEPT_LIBRARY}"
+
+
+def load_library(source: str | None) -> tuple[dict | None, str]:
+    """Every released book's concepts, for check 4: `latest`, from rollingedition.ai; a path or URL; or `none`. None,
+    with why, when there's none to read. A library that can't be fetched is said, never a failure: check 4 is then
+    skipped, as a network can fail where a book's text hasn't."""
+    if not source or source == "none":
+        return None, "no library given"
+    if source == "latest":
+        source = latest_library_url()
+    try:
+        found, _ = load_previous_manifest(source)
+    except (OSError, ValueError) as e:
+        return None, f"the library couldn't be read ({type(e).__name__}), so check 4 was skipped"
+    return found, "" if found is not None else "no library yet"
+
+
 def scratch() -> tempfile.TemporaryDirectory:
     return tempfile.TemporaryDirectory(prefix="re-check-")

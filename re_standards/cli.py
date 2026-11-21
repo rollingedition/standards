@@ -441,12 +441,15 @@ def cmd_addressed(args) -> int:
 def cmd_skill(args) -> int:
     book = bookfmt.load_book(Path(args.book))
     problems, notes = skill.check(book, style.load_config(Path(args.config)) if args.config else None)
-    if not problems and notes:
-        return report("Agent skill", notes, "", warn=True)
     found, _ = skill.read(book.root)
+    if found is None and not problems and notes:              # a live book without one: a note, never a failure
+        return report("Agent skill", notes, "", warn=True)
     n = sum(1 for line in found.body.split("\n") if line.startswith("## ")) if found else 0
-    return report_dated("Agent skill", problems, f"skill.md: {n} procedure(s), each citing the sections it comes from",
-                        book.root, book.manifest, args.base_ref)
+    rc = report_dated("Agent skill", problems, f"skill.md: {n} procedure(s), each citing the sections it comes from",
+                      book.root, book.manifest, args.base_ref)
+    if notes:                                                  # never fails: W-81's commands a Windows shell lacks
+        report("Agent skill, to read again", notes, "", warn=True)
+    return rc
 
 
 def cmd_concepts(args) -> int:
@@ -467,10 +470,23 @@ def cmd_concepts(args) -> int:
     n_relations = sum(len(c.relations) for c in cs)
     since = (f"; every address Edition {previous.edition} released still answers" if previous else
              f" ({note})" if note else "")
-    rc = report("Concepts", problems, f"{len(cs)} concept(s) in {len({c.context for c in cs})} context(s), each "
-                f"definition quoted from its section, with {n_relations} relation(s) of the fixed types{since}")
+    across, across_notes, lib_note = [], [], ""
+    if getattr(args, "library", None):
+        raw, lib_note = checks.load_library(args.library)
+        lib = concepts.library(raw)
+        if lib is not None:
+            across, across_notes = concepts.library_problems(cs, book.slug, lib, concepts.known_contexts(cs), previous)
+            lib_note = f"; checked against {len({d.book for ds in lib.defined.values() for d in ds})} released book(s)"
+        elif raw is not None:
+            lib_note = "; the library isn't one this checker reads, so check 4 was skipped"
+        else:
+            lib_note = f"; {lib_note}" if lib_note else ""
+    rc = report("Concepts", problems + across, f"{len(cs)} concept(s) in {len({c.context for c in cs})} context(s), each "
+                f"definition quoted from its section, with {n_relations} relation(s) of the fixed types{since}{lib_note}")
     if notes:
         report("Concepts, terms used before their definition", notes, "", warn=True)
+    if across_notes:
+        report("Concepts across books (check 4), to read again", across_notes, "", warn=True)
     return 1 if notes and args.strict else rc
 
 
@@ -699,6 +715,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--previous", help="the previous edition, whose concepts' addresses are permanent: `latest`, its "
                                       "machine copy's; a path or URL to its addresses or its record; its sections.json's "
                                       "path, beside which its record is; or `none`")
+    s.add_argument("--library", help="every released book's concepts, for check 4 across books: `latest`, from "
+                                     "rollingedition.ai; a path or URL; or `none` (the default)")
     s.set_defaults(fn=cmd_concepts)
 
     s = sub.add_parser("narration", help="the spoken script: terms no rule reads, and examples, blocks and tables with no "

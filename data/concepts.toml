@@ -135,3 +135,12 @@ changedEdition = "the edition of the book in which its meaning last changed: its
 [uses]
 joining = "-_@"
 fails = false
+
+# Check 4 across books: `re-check concepts --library latest` reads every released
+# book's concepts from rollingedition.ai. A concept at an address another book defined first records, with agrees, that
+# it means the same; a relation to another context's concept names one a released book defines. Until every book has
+# recorded its agreements and links (the cross-book pass of Nov 21, 2026), what it finds is listed and passes; then
+# fails = true makes it fail, as the founder decided. A stale agreement and an unlinked shared term are always listed.
+[library]
+fails = false
+

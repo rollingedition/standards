@@ -90,7 +90,8 @@
     "retrieval-augmented-generation",
     "llm-evaluation",
     "natural-language-processing",
-    "fine-tuning"
+    "fine-tuning",
+    "llm-security"
    ],
    "description": "How language models work and how to build with them."
   },
@@ -105,7 +106,8 @@
    "related": [
     "large-language-models",
     "llm-evaluation",
-    "ai-agents"
+    "ai-agents",
+    "llm-security"
    ],
    "description": "Designing and testing the instructions a model receives."
   },
@@ -122,7 +124,8 @@
     "large-language-models",
     "semantic-search",
     "vector-databases",
-    "llm-evaluation"
+    "llm-evaluation",
+    "llm-security"
    ],
    "description": "Grounding a model's answers in retrieved documents."
   },
@@ -136,7 +139,8 @@
    "wikidata": "Q1142726",
    "related": [
     "prompt-engineering",
-    "llm-evaluation"
+    "llm-evaluation",
+    "llm-security"
    ],
    "description": "Systems where a model plans and uses tools to reach a goal."
   },
@@ -156,7 +160,8 @@
     "ai-agents",
     "model-evaluation",
     "experimentation",
-    "model-monitoring"
+    "model-monitoring",
+    "llm-security"
    ],
    "description": "Test sets, graders, regression suites and monitoring for LLM applications."
   },
@@ -428,7 +433,8 @@
    "related": [
     "data-quality",
     "data-warehousing",
-    "data-pipelines"
+    "data-pipelines",
+    "llm-security"
    ],
    "description": "Knowing what data you hold, who owns it, where it flows and who may see it."
   },
@@ -485,6 +491,25 @@
    "wikidata": "Q186588",
    "related": [],
    "description": "Predicting values that change over time."
+  },
+  {
+   "id": "llm-security",
+   "label": "LLM security",
+   "areas": [
+    "security",
+    "artificial-intelligence"
+   ],
+   "wikipedia": null,
+   "wikidata": null,
+   "related": [
+    "ai-agents",
+    "llm-evaluation",
+    "prompt-engineering",
+    "retrieval-augmented-generation",
+    "large-language-models",
+    "data-governance"
+   ],
+   "description": "Attacking and defending applications and agents built on language models: prompt injection, data exfiltration, tool misuse, and defences you can measure."
   }
  ]
 }

@@ -15,6 +15,11 @@ The check keeps the procedures to what the book teaches, within the format's lim
 act on someone's agent beyond them: the only links are the book's own sections and examples, rollingedition.com and
 .ai, and sources the chapters themselves cite. `re-check addressed` reads skill.md as it reads a chapter.
 Limits and the statuses that must have one are [skill] in data/writing.toml.
+
+Readers' agents run a skill on macOS, Linux and Windows (W-81), so the check reads its commands, never its output, for
+what one system or one machine has: a path on one machine, `sudo` and an install only one system has fail; what a
+Windows shell lacks, such as `source .venv/bin/activate`, `export` or a line continued with `\\`, is listed to read
+again, unless its procedure gives the Windows form too. The rules are [skill.os] in data/writing.toml.
 """
 from __future__ import annotations
 
@@ -172,7 +177,108 @@ def check(book: Book, cfg: dict | None = None) -> tuple[list[str], list[str]]:
         for name, rx in typed:
             if rx.search(text):
                 problems.append(f"{FILE}:{n}: W-25: a typed version of {name}; write {{{{version:{name}}}}}")
-    return problems, []
+    failing, notes = os_assumptions(skill.body, skill.offset, rules.get("os"))
+    return problems + failing, notes
+
+
+HEADING = re.compile(r"^#{1,6}\s")
+SPAN = re.compile(r"(`+)(.+?)\1")
+SHELL_COMMENT = re.compile(r"(?:^|\s)#.*$")
+
+
+@dataclass
+class _Procedure:
+    text: list[str]                         # every line under its heading, output included, for `unless`
+    read: list[tuple[int, str, str]]        # (line, what a rule reads, its kind: shell, inline, windows or code)
+    windows: bool = False                   # it has a Windows block: its Windows form
+
+
+def _os_procedures(body: str, offset: int, conf: dict) -> list[_Procedure]:
+    """skill.md as W-81 reads it: everything under each heading, with the commands, inline code and code its rules read.
+    A procedure is the unit, since it often gives each system's form in a step or a block of its own. Output is never
+    read."""
+    shells, sessions, windows, output = (set(conf[k]) for k in ("shells", "sessions", "windows", "output"))
+    prompt = re.compile(conf["prompt"])
+    procs, fence, lang = [_Procedure([], [])], None, ""
+    for n, line in enumerate(body.split("\n"), offset + 1):
+        stripped = line.strip()
+        m = FENCE.match(stripped)
+        if fence is None and m:                         # a block opens: known by its info string's first word
+            fence = m.group(1)
+            lang = (stripped[len(fence):].strip().split() or [""])[0].strip("{}.").lower()
+            procs[-1].windows |= lang in windows
+            procs[-1].text.append(line)
+            continue
+        if fence is not None:
+            if stripped.startswith(fence):
+                fence = None
+            elif lang in shells:
+                command = SHELL_COMMENT.sub("", stripped).rstrip()
+                if command:
+                    procs[-1].read.append((n, command, "shell"))
+            elif lang in sessions:
+                if p := prompt.match(stripped):
+                    procs[-1].read.append((n, SHELL_COMMENT.sub("", stripped[p.end():]).rstrip(), "shell"))
+            elif lang in windows:
+                procs[-1].read.append((n, stripped, "windows"))
+            elif lang and lang not in output:
+                procs[-1].read.append((n, stripped, "code"))
+            procs[-1].text.append(line)
+            continue
+        if HEADING.match(line):
+            procs.append(_Procedure([], []))
+        procs[-1].text.append(line)
+        procs[-1].read += [(n, s.group(2).strip(), "inline") for s in SPAN.finditer(line)]
+    return [p for p in procs if p.text]
+
+
+def os_assumptions(body: str, offset: int = 0, conf: dict | None = None,
+                   file: str = FILE) -> tuple[list[str], list[str]]:
+    """W-81: what in a skill's commands only one system or one machine has, as (problems, notes). Problems fail the
+    check: a path on one machine, sudo, an install only one system has. Notes are what a Windows shell lacks, listed to
+    read again. A procedure that gives the other systems' form, as a rule's `unless` or a Windows block says, passes.
+    `conf` is [skill.os] in data/writing.toml; `file` names the file in each line found."""
+    conf = conf if conf is not None else settings().get("os")
+    if not conf:
+        return [], []
+    found: dict[str, list[tuple[int, int, str]]] = {"fail": [], "warn": []}
+    rules = [(i, r, re.compile(r["pattern"].replace("{cmd}", conf["cmd"])),
+              [re.compile(u) for u in r.get("unless", [])]) for i, r in enumerate(conf.get("rules", []))]
+    installs = conf.get("installs")
+    if installs:
+        families = installs["families"]
+        manager = {m: family for family, f in families.items() for m in f["managers"]}
+        managers = "|".join(map(re.escape, sorted(manager, key=len, reverse=True)))     # apt-get before apt
+        install = re.compile(r"(?<![\w./-])(?P<manager>" + managers + r")\s+" + installs["verbs"])
+        anywhere = re.compile(installs["anywhere"])
+        named = {family: [re.compile(x) for x in f["names"]]
+                 + [re.compile(r"(?<![\w./-])" + re.escape(m) + r"(?![\w-])") for m in f["managers"]]
+                 for family, f in families.items()}
+    for proc in _os_procedures(body, offset, conf):
+        text = "\n".join(proc.text)
+        for i, rule, rx, unless in rules:
+            if (rule.get("windows_form") and proc.windows) or any(u.search(text) for u in unless):
+                continue
+            seen = set()
+            for n, what, kind in proc.read:
+                if kind not in rule.get("in", ["shell", "inline"]) or n in seen or not (m := rx.search(what)):
+                    continue
+                seen.add(n)
+                shown = (m.groupdict().get("found") or m.group(0)).strip()
+                found[rule["level"]].append((n, i, rule["message"].replace("{found}", shown)))
+        if not installs:
+            continue
+        for n, what, kind in proc.read:
+            if kind not in installs["in"] or not (m := install.search(what)):
+                continue
+            family = manager[m.group("manager")]
+            missing = [f for f in families if f != family and not any(x.search(text) for x in named[f])]
+            if missing and not anywhere.search(text):
+                message = (installs["message"].replace("{found}", m.group(0).strip()).replace("{family}", family)
+                           .replace("{missing}", " or ".join(missing)))
+                found[installs["level"]].append((n, len(rules), message))
+    lines = {level: [f"{file}:{n}: W-81: {message}" for n, _, message in sorted(hits)] for level, hits in found.items()}
+    return lines["fail"], lines["warn"]
 
 
 def body_for_agents(book: Book, skill: Skill, reference: str = "references/{chapter}.md",

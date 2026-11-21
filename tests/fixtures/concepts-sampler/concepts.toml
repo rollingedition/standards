@@ -110,6 +110,7 @@ formula = "nDCG@k = DCG@k / DCG@k of the ideal ranking"
 section = "ndcg"
 applies_to = ["scikit-learn"]
 example = "ndcg-by-hand"
+agrees = [{ book = "another-search-book", definition = "nDCG divides DCG by the DCG of the ideal ranking." }]   # check 4
 
 [concepts.relations]
 computed-from = ["dcg"]

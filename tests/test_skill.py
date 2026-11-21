@@ -92,3 +92,112 @@ def test_changes_to_the_procedures_ride_with_the_next_edition():
     assert checks.rides_along(["skill.md"]) and checks.rides_along(["skill.md", "narration/lexicon.toml"])
     assert not checks.rides_along(["skill.md", "chapters/01-a.md"]) and not checks.rides_along(["docs/skill.md"])
     assert checks.check_kind_label([], ["skill.md"]) == []
+
+
+# W-81: commands that run on macOS, Linux and Windows. Each rule's message, by a phrase only it uses.
+RULE = {"machine-path": "on one person's machine", "sudo": "sudo asks for a password", "install": "installs on",
+        "posix-environment": "keeps these in Scripts", "python3": "not `python3`", "tmp": "no /tmp", "tilde": "hand ~",
+        "backslash-path": "a backslash separates", "export": "have no export", "one-command-variable": "for one command",
+        "dev-null": "`/dev/null`", "line-continuation": "a line continued"}
+
+
+def lint(text: str) -> tuple[list[str], list[str]]:
+    """(failing rules, rules to read again) that W-81 finds in procedures, by name."""
+    fails, notes = skill.os_assumptions(text)
+    named = lambda found: [next(r for r, phrase in RULE.items() if phrase in p) for p in found]
+    return named(fails), named(notes)
+
+
+def test_w81_fails_a_path_on_one_machine_but_not_a_path_in_the_project_or_a_url():
+    assert lint("## Load\n\n1. Read `/home/reader/data/raw.csv`.\n") == (["machine-path"], [])
+    assert lint("## Load\n\n```sh\ncd /Users/reader/book\n```\n") == (["machine-path"], [])
+    assert lint("## Load\n\n```powershell\nSet-Location C:\\Users\\reader\\book\n```\n") == (["machine-path"], [])
+    for fine in ["`data/raw.csv`", "`$HOME/book`", "`https://example.org/home/reader/x`", "`GET /Users/{id}`",
+                 "[the docs](https://example.org/home/reader)", "on Windows, `C:\\path\\to\\book`",
+                 "the folder /home/reader, which isn't code"]:
+        assert lint(f"## Load\n\n1. Read {fine}.\n") == ([], []), fine
+
+
+def test_w81_fails_sudo_as_a_command_but_not_a_word_about_it():
+    assert lint("## Build\n\n```bash\nsudo make install\n```\n") == (["sudo"], [])
+    assert lint("## Build\n\n1. Run `sudo make install`.\n") == (["sudo"], [])
+    assert lint("## Build\n\n1. Run it without `sudo`.\n\n```sh\n# sudo is never needed here\nmake\n```\n") == ([], [])
+
+
+def test_w81_fails_an_install_only_one_os_has_unless_its_procedure_names_the_others():
+    assert lint("## Draw\n\n1. Install Graphviz: `brew install graphviz`.\n") == (["install"], [])
+    fails, _ = skill.os_assumptions("## Draw\n\n```powershell\nwinget install Graphviz.Graphviz\n```\n")
+    assert "`winget install` installs on Windows only" in fails[0] and "for macOS or Linux" in fails[0]
+    one_line = ("1. Install Graphviz: `brew install graphviz` on macOS, `apt-get install graphviz` on Debian or Ubuntu, "
+                "`winget install Graphviz.Graphviz` on Windows.\n")
+    bullets = "- **macOS:** `brew install graphviz`\n- **Linux:** `apt-get -y install graphviz`\n- **Windows:** see its page\n"
+    anywhere = "1. Install uv: `brew install uv`, or `pip install uv` on any system.\n"
+    for fine in [one_line, bullets, anywhere]:
+        assert lint(f"## Draw\n\n{fine}") == ([], []), fine
+    # the alternatives count in the same procedure, never in another one
+    assert lint("## Draw\n\n1. `brew install graphviz`.\n\n## Elsewhere\n\n1. On Linux or Windows, read the page.\n") \
+        == (["install"], [])
+
+
+def test_w81_lists_what_a_windows_shell_lacks_to_read_again_without_failing():
+    cases = {"posix-environment": "```sh\nsource .venv/bin/activate\n```",
+             "python3": "1. Run `python3 -m pip install -r requirements.txt`.",
+             "tmp": "1. Write the scores to `/tmp/scores.csv`.",
+             "tilde": "```sh\npython ~/book/load.py\n```",
+             "backslash-path": "1. Run `python scripts\\load.py`.",
+             "export": "```sh\nexport HF_HUB_OFFLINE=1\n```",
+             "one-command-variable": "1. Run `HF_HUB_OFFLINE=1 python load.py`.",
+             "dev-null": "1. Run `python load.py > /dev/null`.",
+             "line-continuation": "```bash\nuv pip install \\\n  -r requirements.txt\n```"}
+    for rule, text in cases.items():
+        assert lint(f"## Run\n\n{text}\n") == ([], [rule]), rule
+    fails, notes = skill.os_assumptions("## Run\n\n1. Run `python3 load.py`.\n", offset=3)
+    assert not fails and notes[0].startswith("skill.md:6: W-81: `python3`: an environment on Windows has `python`")
+    assert lint("## Run\n\n```python\nwith open(\"/tmp/scores.csv\", \"w\") as f:\n    f.write(x)\n```\n") == ([], ["tmp"])
+
+
+def test_w81_passes_the_same_commands_where_the_procedure_gives_the_windows_form():
+    windows = "\n\n```powershell\n.venv\\Scripts\\Activate.ps1\n$env:HF_HUB_OFFLINE = \"1\"\n```\n"
+    assert lint("## Run\n\n```sh\nsource .venv/bin/activate\nexport HF_HUB_OFFLINE=1\n```" + windows) == ([], [])
+    assert lint("## Run\n\n1. `source .venv/bin/activate` (on Windows, `.venv\\Scripts\\activate`).\n") == ([], [])
+    assert lint("## Run\n\n1. `python3 load.py`, or `py load.py` on Windows.\n") == ([], [])
+
+
+def test_w81_never_reads_output_or_what_only_looks_like_a_command():
+    output = ("## Run\n\n```text\nFile \"/home/runner/.venv/bin/python\", line 3\nsudo: a password is required\n```\n\n"
+              "```\nwrote /tmp/out.csv as /home/reader\n```\n\n"
+              "```console\n$ python load.py\nwrote /tmp/out.csv to /home/reader/book\n```\n")
+    assert lint(output) == ([], [])
+    assert lint("## Run\n\n```console\n$ sudo make install\n```\n") == (["sudo"], [])
+    for fine in ["`cd scripts && python load.py`", "`python load.py || exit 1`", "`/usr/bin/python3`",
+                 "`./tmp/x`", "`~/.cache/huggingface`", "about `~5 MB`", "`\\d+\\.\\d+`", "`console\\.log\\(`",
+                 "the module's `export` list", "`DIR=<another directory>`", "set `k=10`", "`/proc`",
+                 "the `apt` package", "`python -m pip install -r requirements.txt`"]:
+        assert lint(f"## Run\n\n1. See {fine}.\n") == ([], []), fine
+    assert lint("## Run\n\n```python\ntotal = first + \\\n    second\n```\n") == ([], [])
+
+
+def test_skill_check_fails_w81_problems_and_lists_its_notes_with_skill_md_lines(tmp_path):
+    step = "1. Install with `sudo pip3 install x` ([Load the data](#load-data))."
+    text = GOOD + f"\n## Install\n\n{step}\n2. `python3 x.py`.\n"
+    problems, notes = skill.check(book(tmp_path, text))
+    line = text.split("\n").index(step) + 1
+    assert problems == [f"skill.md:{line}: W-81: `sudo pip3`: sudo asks for a password an agent can't give, and changes "
+                        "the machine, not the project: install into the project's environment (`uv pip install …`), "
+                        "or say what the reader installs themselves"]
+    assert notes == [f"skill.md:{line + 1}: W-81: `python3`: an environment on Windows has `python`, not `python3`: "
+                     "write `python`, run in the project's environment"]
+
+
+def test_re_check_skill_lists_w81_notes_and_a_released_book_takes_its_problems_with_its_next_edition(tmp_path, capsys):
+    from re_standards import cli
+    text = GOOD + "\n## Install\n\n1. Run `sudo make install` ([Load the data](#load-data)), then `python3 x.py`.\n"
+    draft = book(tmp_path / "draft", text, manifest=MANIFEST.replace('"live"', '"draft"'))
+    assert cli.main(["skill", "--book", str(draft.root)]) == 1
+    err = capsys.readouterr().err
+    assert "Agent skill: 1 problem(s)" in err and "Agent skill, to read again: 1 warning(s)" in err
+    live = book(tmp_path / "live", text)                 # released, its text unchanged since W-81 took effect
+    assert cli.main(["skill", "--book", str(live.root)]) == 0
+    out = capsys.readouterr()
+    assert "rules this book takes with its next content edition" in out.err and "to read again" in out.err
+    assert "procedure(s), each citing" in out.out

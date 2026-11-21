@@ -701,7 +701,7 @@ def test_a_book_without_concepts_fetches_nothing_for_latest(tmp_path, monkeypatc
 def test_the_book_checks_workflow_runs_it_and_a_change_to_concepts_alone_rides_along():
     flow = yaml.safe_load((standards_root() / ".github" / "workflows" / "book-checks.yml").read_text())
     runs = [s.get("run", "") for s in flow["jobs"]["manifest"]["steps"]]
-    assert 're-check concepts --book . --previous "${RE_PREVIOUS_SECTIONS:-latest}"' in runs
+    assert 're-check concepts --book . --previous "${RE_PREVIOUS_SECTIONS:-latest}" --library latest' in runs
     with open(data_path("review-tiers.toml"), "rb") as f:
         assert tomllib.load(f)["files"]["concepts"] == [concepts.FILE]
     assert checks.rides_along([concepts.FILE]) and checks.check_kind_label([], [concepts.FILE]) == []
@@ -726,3 +726,100 @@ def test_each_rule_s_problems_lead_with_its_id(rule, tmp_path):
     else:
         found = problems(sampler(tmp_path, edit=edits[rule]))
     assert found and all(rules.rule_of(p) == rule for p in found)
+
+
+# ---------------------------------------------------------------- check 4, across books
+
+BASE = "https://rollingedition.com/concepts/"
+LABEL = ("ml-book", "machine-learning/label", "label", "A label is the answer a model learns to give.")   # the sampler links it
+
+
+def lib(*concepts_, retired=None) -> concepts.Library:
+    """A library of other books' concepts, (book, context/id, term, definition), with the one the sampler links to."""
+    books: dict = {}
+    for book, ref, term, definition in (LABEL, *concepts_):
+        books.setdefault(book, {"edition": "2026.11.1", "retired": {}, "concepts": []})["concepts"].append(
+            {"address": BASE + ref, "term": term, "aliases": [], "definition": definition, "first_edition": "2026.11.1"})
+    for book, old, new in retired or []:
+        books.setdefault(book, {"edition": "2026.11.1", "retired": {}, "concepts": []})["retired"][BASE + old] = BASE + new
+    return concepts.library({"schema": concepts.LIBRARY_SCHEMA, "books": books})
+
+
+def across(book, library, released=None, fails=True, monkeypatch=None):
+    if monkeypatch:
+        monkeypatch.setitem(concepts.settings(), "library", {"fails": fails})
+    return concepts.library_problems(book.concepts, book.slug, library, concepts.known_contexts(book.concepts), released)
+
+
+def line_of(book, cid) -> int:
+    return next(c.line for c in book.concepts if c.id == cid)
+
+
+NDCG = ("another-search-book", "search-and-recommendation/ndcg", "nDCG", "nDCG divides DCG by the DCG of the ideal ranking.")
+DCG = ("third-book", "search-and-recommendation/dcg", "DCG", "DCG adds up discounted gains.")
+
+
+def test_a_new_concept_at_another_book_s_address_records_its_agreement_or_fails(tmp_path, monkeypatch):
+    book = bookfmt.load_book(SAMPLER)
+    found, notes = across(book, lib(NDCG, DCG), monkeypatch=monkeypatch)
+    assert found == [f"concepts.toml:{line_of(book, 'dcg')}: dcg: check 4: search-and-recommendation/dcg is third-book's "
+                     "too: \"DCG adds up discounted gains.\". If yours means the same, keep the address and record it, "
+                     "agrees = [{ book = \"third-book\", definition = \"its sentence\" }]; if not, give yours an ID or a "
+                     "context of its own"]
+    assert not [n for n in notes if ": ndcg: check 4: " in n]                 # ndcg's agreement holds
+    # released already, at this book's edition before: only listed, so another book's later choice never stops it
+    released = concepts.Released("2026.11.1", {BASE + "search-and-recommendation/dcg"}, {})
+    found, notes = across(book, lib(NDCG, DCG), released, monkeypatch=monkeypatch)
+    assert found == [] and any("dcg is third-book's too" in n and "retire this address to it" in n for n in notes)
+
+
+def test_an_agreement_whose_sentence_changed_or_whose_book_left_is_listed_not_failed(tmp_path, monkeypatch):
+    book = bookfmt.load_book(SAMPLER)
+    found, notes = across(book, lib(NDCG[:3] + ("nDCG is DCG over the ideal DCG.",)), monkeypatch=monkeypatch)
+    assert found == [] and any("has changed its sentence for search-and-recommendation/ndcg" in n for n in notes)
+    found, notes = across(book, lib(), monkeypatch=monkeypatch)
+    assert found == [] and any("agrees names another-search-book, which doesn't define" in n for n in notes)
+
+
+def test_a_link_to_another_context_names_a_released_concept_or_its_successor(tmp_path, monkeypatch):
+    book = sampler(tmp_path, edit=('close-to = ["https://rollingedition.com/concepts/machine-learning/label"]',
+                                   'close-to = ["https://rollingedition.com/concepts/machine-learning/old-label", '
+                                   '"https://rollingedition.com/concepts/machine-learning/nowhere"]'))
+    found, _ = across(book, lib(retired=[("ml-book", "machine-learning/old-label", "machine-learning/label")]),
+                      monkeypatch=monkeypatch)
+    assert sorted(p.split("check 4: ")[1] for p in found) == [
+        "close-to machine-learning/nowhere: no released book defines it",
+        "close-to machine-learning/old-label: ml-book retired it; its successor is machine-learning/label"]
+
+
+def test_the_same_term_in_another_book_and_context_is_a_note_until_linked(tmp_path, monkeypatch):
+    book = bookfmt.load_book(SAMPLER)
+    found, notes = across(book, lib(("ml-book", "machine-learning/precision-at-k", "precision@k",
+                                     "Precision at k is the share of the top k that is relevant.")), monkeypatch=monkeypatch)
+    assert found == [] and any("ml-book also defines 'precision@k', as machine-learning/precision-at-k" in n for n in notes)
+    assert not any("'label'" in n for n in notes)                       # linked already, with close-to
+
+
+def test_until_every_book_records_its_agreements_check_4_lists_and_passes(tmp_path, monkeypatch, capsys):
+    assert concepts.settings()["library"]["fails"] is False          # the founder's hard check comes after the pass
+    book = bookfmt.load_book(SAMPLER)
+    found, notes = across(book, lib(DCG), fails=False, monkeypatch=monkeypatch)
+    assert found == [] and any("dcg is third-book's too" in n for n in notes)
+    records = {}
+    for b, ref, term, definition in (LABEL, NDCG, DCG):
+        records.setdefault(b, {"edition": "2026.11.1", "concepts": []})["concepts"].append(
+            {"address": BASE + ref, "term": term, "aliases": [], "definition": definition, "first_edition": "2026.11.1"})
+    path = tmp_path / "library.json"
+    path.write_text(__import__("json").dumps(concepts.library_record(records)))
+    monkeypatch.setitem(concepts.settings(), "library", {"fails": True})
+    assert cli.main(["concepts", "--book", str(SAMPLER), "--library", str(path)]) == 1
+    assert "dcg is third-book's too" in capsys.readouterr().err
+    monkeypatch.setitem(concepts.settings(), "library", {"fails": False})
+    assert cli.main(["concepts", "--book", str(SAMPLER), "--library", str(path)]) == 0
+    out = capsys.readouterr()
+    assert "checked against 3 released book(s)" in out.out and "Concepts across books (check 4)" in out.err + out.out
+
+
+def test_a_library_that_can_t_be_read_skips_check_4_and_says_so(tmp_path, capsys):
+    assert cli.main(["concepts", "--book", str(SAMPLER), "--library", str(tmp_path / "missing.json")]) == 0
+    assert "no library yet" in capsys.readouterr().out

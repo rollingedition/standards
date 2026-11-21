@@ -87,7 +87,8 @@ FILE_KEYS = {"context", "namespace", "contexts", "concepts", "retired"}
 NAMESPACE_KEYS = {"id", "base"}
 CONTEXT_KEYS = {"id", "broader", "label", "description"}
 CONCEPT_KEYS = {"id", "term", "aliases", "definition", "formula", "section", "context", "relations", "applies_to",
-                "example", "wikidata"}
+                "example", "wikidata", "agrees"}
+AGREES_KEYS = {"book", "definition"}
 TARGET_KEYS = {"to", "versions"}
 PACKAGE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$")
 WIKIDATA = re.compile(r"^wikidata:(Q[1-9][0-9]*)$")
@@ -126,6 +127,14 @@ class Relation:
     versions: str = ""          # implemented-by's version range, as ">=0.3"
 
 
+@dataclass(frozen=True)
+class Agreement:
+    """Check 4's record that a concept means what another book's concept at the same address means: that book, and
+    the sentence of its that was read, as it stood then."""
+    book: str
+    definition: str
+
+
 @dataclass
 class Context:
     """A narrower context a file declares, under one of the taxonomy's areas or skills or another it declares; in an
@@ -150,6 +159,7 @@ class Concept:
     applies_to: list[str] = field(default_factory=list)
     example: str = ""
     wikidata: str = ""
+    agrees: list["Agreement"] = field(default_factory=list)   # check 4: the book that defined its address first
     line: int = 0               # its [[concepts]] header's line in the file, for messages
 
     @property
@@ -261,6 +271,20 @@ def _relations(raw, where: str, problems: list[str]) -> list[Relation]:
     return out
 
 
+def _agrees(raw, where: str, problems: list[str]) -> list[Agreement]:
+    if raw is None:
+        return []
+    out: list[Agreement] = []
+    for item in raw if isinstance(raw, list) else [raw]:
+        if (isinstance(item, dict) and set(item) <= AGREES_KEYS and valid_id(str(item.get("book") or ""))
+                and isinstance(item.get("definition"), str) and item["definition"].strip()):
+            out.append(Agreement(item["book"], " ".join(item["definition"].split())))
+        else:
+            problems.append(f"{where}: agrees lists the books whose concept at this address this one means, each as "
+                            "{ book = \"its-slug\", definition = \"its sentence, as you read it\" }")
+    return out
+
+
 def parse(text: str, file: str = FILE) -> ConceptSet:
     """A concepts.toml from its text. Problems are collected, not raised, so a check can report all of them."""
     cs = ConceptSet(file=file, present=True)
@@ -358,7 +382,8 @@ def parse(text: str, file: str = FILE) -> ConceptSet:
             relations=_relations(raw.get("relations"), where, problems),
             applies_to=_strings(raw.get("applies_to"), "applies_to", where, problems),
             example=_text(raw, "example", where, problems),
-            wikidata=_text(raw, "wikidata", where, problems), line=line)
+            wikidata=_text(raw, "wikidata", where, problems), agrees=_agrees(raw.get("agrees"), where, problems),
+            line=line)
         if not concept.context:
             problems.append(f"{where}: name its context, or give the file one with context = \"…\" at its top")
         if BLANK_LINE.search(concept.definition) or BLANK_LINE.search(concept.formula):
@@ -959,6 +984,130 @@ def link_problems(book: Book, cs: ConceptSet) -> list[str]:
                 done.add(chapter.chapter_id)
                 break
     return problems
+
+
+# ---------------------------------------------------------------- check 4, across books
+
+
+@dataclass(frozen=True)
+class Defined:
+    """One released book's concept at an address, as the library lists it."""
+    book: str
+    address: str
+    term: str
+    aliases: tuple[str, ...]
+    definition: str
+    first_edition: str
+
+
+@dataclass
+class Library:
+    """Every released book's concepts, as rollingedition.ai serves them (`library_record`): what check 4 reads."""
+    defined: dict[str, list[Defined]] = field(default_factory=dict)      # address -> each book's concept at it
+    retired: dict[str, tuple[str, str]] = field(default_factory=dict)    # a retired address -> (book, successor)
+    names: dict[str, list[Defined]] = field(default_factory=dict)        # a term or alias, casefolded -> concepts
+
+
+
+LIBRARY_SCHEMA = 1
+
+
+def edition_key(edition: str) -> tuple:
+    try:
+        return tuple(int(p) for p in edition.split("."))
+    except (AttributeError, ValueError):
+        return (10 ** 9,)                                  # not released yet: after every released edition
+
+
+def library_record(records: Mapping[str, Mapping]) -> dict:
+    """The library as served, from each book's current edition's record (edition_record), by book: each concept's
+    address, term, aliases, definition and first edition, and the addresses each book retired."""
+    books = {}
+    for slug, rec in sorted(records.items()):
+        books[slug] = {"edition": rec.get("edition"), "retired": dict(sorted((rec.get("retired") or {}).items())),
+                       "concepts": [{"address": r["address"], "term": r["term"], "aliases": list(r.get("aliases") or []),
+                                     "definition": r["definition"], "first_edition": r.get("first_edition") or rec.get("edition")}
+                                    for r in sorted(rec.get("concepts") or [], key=lambda r: r["address"])]}
+    return {"schema": LIBRARY_SCHEMA, "books": books}
+
+
+def library(data) -> Library | None:
+    """The library from library_record's shape; None for anything else."""
+    if not isinstance(data, Mapping) or data.get("schema") != LIBRARY_SCHEMA or not isinstance(data.get("books"), Mapping):
+        return None
+    lib = Library()
+    for slug, b in data["books"].items():
+        for r in b.get("concepts") or []:
+            d = Defined(slug, r["address"], r["term"], tuple(r.get("aliases") or ()), r["definition"],
+                        str(r.get("first_edition") or ""))
+            lib.defined.setdefault(d.address, []).append(d)
+            for name in (d.term, *d.aliases):
+                lib.names.setdefault(name.casefold(), []).append(d)
+        for old, new in (b.get("retired") or {}).items():
+            lib.retired[old] = (slug, new)
+    return lib
+
+
+def library_problems(cs: ConceptSet, slug: str, lib: Library, known: set[str],
+                     released: Released | None = None) -> tuple[list[str], list[str]]:
+    """Check 4 across books: (problems, notes) for a book's concepts against every other released book's.
+    - A concept new to this book (not at an address its edition before, `released`, had) at an address another released
+      book defines records that it means the same, with agrees and that book's sentence as it read it; without one it's
+      a problem, so two books never share an address by accident. Edition numbers count a book's own editions, not
+      dates, so the order comes from this book's own history, never from comparing two books' editions.
+    - A relation to another context's concept names one a released book defines; one retired names its successor.
+    - Notes, never problems, so one book's change never stops another book's pull request: a released concept that
+      shares its address with no agreement, an agreement whose sentence the other book has since changed or that names
+      a book no longer defining the address, and the same term or alias in another book, in another context, unlinked."""
+    problems: list[str] = []
+    notes: list[str] = []
+    had = set(released.addresses) if released else set()
+    short = lambda address: address.split("/concepts/", 1)[-1]          # noqa: E731
+    for c in cs.concepts:
+        where = f"{cs.where(c.line)}: {c.id}"
+        address = cs.address(c.context, c.id)
+        others = [d for d in lib.defined.get(address, []) if d.book != slug]
+        for d in others:
+            said = next((a for a in c.agrees if a.book == d.book), None)
+            if said is None:
+                line = (f"{where}: check 4: {short(address)} is {d.book}'s too: \"{d.definition}\". If yours means the same, "
+                        f"keep the address and record it, agrees = [{{ book = \"{d.book}\", definition = \"its sentence\" }}]; "
+                        "if not, give yours an ID or a context of its own" + (", and retire this address to it" if address in had else ""))
+                (notes if address in had else problems).append(line)
+            elif squash(said.definition) != squash(d.definition):
+                notes.append(f"{where}: check 4: {d.book} has changed its sentence for {short(address)} since this agreement: "
+                             f"it now reads \"{d.definition}\". Read it again, and update agrees or give this concept an "
+                             "address of its own")
+        for a in c.agrees:
+            if a.book != slug and not any(d.book == a.book for d in others):
+                notes.append(f"{where}: check 4: agrees names {a.book}, which doesn't define {short(address)} now")
+        linked = set()
+        for r in c.relations:
+            spec = relation_types().get(r.type) or {}
+            if spec.get("target") in ("package", "organization") or WIKIDATA.match(r.to):
+                continue
+            target, _ = resolve(cs, r.to, c.context, known)
+            if target is None or target.local or target.namespace != cs.namespace:
+                continue
+            to = cs.address(target.context, target.id)
+            linked.add(to)
+            if to in lib.retired and to not in lib.defined:
+                book, successor = lib.retired[to]
+                problems.append(f"{where}: check 4: {r.type} {short(to)}: {book} retired it; its successor is "
+                                f"{short(successor)}")
+            elif to not in lib.defined:
+                problems.append(f"{where}: check 4: {r.type} {short(to)}: no released book defines it")
+        seen = set()
+        for name in c.names:
+            for d in lib.names.get(name.casefold(), []):
+                if d.book == slug or d.address == address or d.address in linked or d.address in seen:
+                    continue
+                seen.add(d.address)
+                notes.append(f"{where}: check 4: {d.book} also defines {name!r}, as {short(d.address)}: \"{d.definition}\". "
+                             "If they mean the same, link them with same-as; nearly, close-to; else nothing")
+    if not settings().get("library", {}).get("fails", False):
+        return [], problems + notes
+    return problems, notes
 
 
 # ---------------------------------------------------------------- the check

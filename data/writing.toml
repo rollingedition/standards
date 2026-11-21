@@ -59,6 +59,119 @@ max_words = 3000               # about 4,000 tokens, inside the format's advice 
 min_procedures = 1
 link_hosts = ["rollingedition.com", "rollingedition.ai"]   # besides the sources the chapters cite
 
+[skill.os]                     # W-81: a skill's commands run on macOS, Linux and Windows, or give each its own form
+# What the rules read: inline code ("inline"), each line of a shell block and each command of a session block, after
+# its prompt ("shell"), each line of a Windows block ("windows") and, only for a rule whose `in` names it, any other
+# block with a language ("code"). A session's other lines, an output block and a block with no language are output,
+# which nothing reads. A block is known by its info string's first word; comment lines in a shell block aren't read.
+shells = ["sh", "bash", "zsh", "shell"]
+sessions = ["console", "shell-session", "terminal"]
+prompt = '^\s*[$%]\s+'
+windows = ["powershell", "pwsh", "ps1", "cmd", "bat", "batch"]
+output = ["text", "txt", "output", "plaintext", "log"]
+# Where a command starts, for a pattern's {cmd}: at the start, or after ; & | ( or then, do and else
+cmd = '(?:^|[;&|(]\s*|\b(?:then|do|else)\s+)'
+
+# Each rule has an `id`; a `pattern`, a Python regular expression, whose group `found`, if it has one, is what the
+# message names; a `level`, fail, or warn: listed to read again, never failing; and `in`, what it reads (shell and
+# inline unless it says). It holds unless the procedure it's in, everything under the same heading, gives the other
+# systems' form: by any of its `unless` patterns, or, with `windows_form`, a Windows block. `message` says what to
+# write instead, with {found} for what matched.
+[[skill.os.rules]]
+id = "machine-path"            # someone's home folder, on Linux, macOS or Windows
+level = "fail"
+in = ["shell", "inline", "windows"]
+pattern = '(?<![\w.$%~:/\\-])/(?:home|Users)/[\w.-]+[^\s"\x27`)]*|(?<![\w\\/.-])[A-Za-z]:[\\/]Users[\\/][\w.-]+[^\s"\x27`)]*'
+message = "`{found}` is a folder on one person's machine: write the path relative to the project, as `data/raw.csv`"
+
+[[skill.os.rules]]
+id = "sudo"
+level = "fail"
+in = ["shell", "inline", "windows"]
+pattern = '{cmd}(?P<found>sudo\s+\S+)'
+message = "`{found}`: sudo asks for a password an agent can't give, and changes the machine, not the project: install into the project's environment (`uv pip install …`), or say what the reader installs themselves"
+
+[[skill.os.rules]]
+id = "posix-environment"       # a virtual environment's bin/, which is Scripts\ on Windows
+level = "warn"
+pattern = '(?<![\w.-])(?:\S*/)?(?:bin/activate(?:\.\w+)?|[\w.-]*env/bin/(?:python|pip)[\d.]*)(?![\w-])'
+unless = ['Scripts[\\/]', 'Activate\.ps1', 'activate\.bat']
+windows_form = true
+message = "`{found}`: an environment on Windows keeps these in Scripts\\, not bin/: give the Windows form too, as `.venv\\Scripts\\activate` or `.venv\\Scripts\\python.exe`"
+
+[[skill.os.rules]]
+id = "python3"
+level = "warn"
+pattern = '{cmd}(?P<found>python3(?:\.\d+)?)(?=\s|$)'
+unless = ['\bWindows\b', '(?<![\w./-])py\s+(?:-3|\S+\.py)']
+windows_form = true
+message = "`{found}`: an environment on Windows has `python`, not `python3`: write `python`, run in the project's environment"
+
+[[skill.os.rules]]
+id = "tmp"
+level = "warn"
+in = ["shell", "inline", "code"]
+pattern = '(?<![\w.~$/-])/tmp(?![\w.-])[^\s"\x27`)]*'
+windows_form = true
+message = "`{found}`: Windows has no /tmp: use a folder in the project that .gitignore leaves out, or Python's tempfile"
+
+[[skill.os.rules]]
+id = "tilde"                   # ~ handed to a command; a path written alone, as `~/.cache`, is left to the reader
+level = "warn"
+pattern = '(?<=[\s=])~[/\\][^\s"\x27`)]*'
+windows_form = true
+message = "`{found}`: cmd and Windows PowerShell hand ~ to a program as typed: write the path relative to the project, or $HOME, which bash, zsh and PowerShell expand"
+
+[[skill.os.rules]]
+id = "backslash-path"          # .\x, a\b\c, a\b.ext, C:\x; a regular expression's \. or \( is no folder
+level = "warn"
+pattern = '(?<![^\s"\x27=(])(?:\.{1,2}\\[\w.$%-]|[\w.$%-]+\\[\w$%][\w.$%-]*\\[\w$%]|[\w-]+\\[\w$%][\w-]*\.[A-Za-z]{1,4}\b|[A-Za-z]:\\[\w$%])[^\s"\x27`)]*'
+unless = ['\bWindows\b', '\bPowerShell\b', '\bcmd\b']
+message = "`{found}`: a backslash separates folders only on Windows: write /, which programs on Windows and PowerShell take too"
+
+[[skill.os.rules]]
+id = "export"
+level = "warn"
+pattern = '{cmd}(?P<found>export\s+[A-Za-z_]\w*=)'
+unless = ['\$env:']
+windows_form = true
+message = "`{found}`: Windows shells have no export: give the PowerShell form too (`$env:NAME = \"value\"`), or set the value where the code reads it"
+
+[[skill.os.rules]]
+id = "one-command-variable"    # NAME=value command
+level = "warn"
+pattern = '{cmd}(?P<found>(?:[A-Z_][A-Z0-9_]*=\S*\s+)+)(?=[a-z./][\w./-]*(?:\s|$))'
+unless = ['\$env:']
+windows_form = true
+message = "`{found}`: a Windows shell can't set a variable for one command: give the PowerShell form too (`$env:NAME = \"value\"`, then the command), or set it where the code reads it"
+
+[[skill.os.rules]]
+id = "dev-null"
+level = "warn"
+pattern = '/dev/null\b'
+windows_form = true
+message = "`/dev/null`: Windows has none (PowerShell writes $null, cmd NUL): leave the redirect out, or give the Windows form too"
+
+[[skill.os.rules]]
+id = "line-continuation"       # && and || chains are fine: PowerShell 7 and cmd run them
+level = "warn"
+in = ["shell"]
+pattern = '(?<!\\)\\$'
+windows_form = true
+message = "a line continued with \\: a Windows shell doesn't (PowerShell continues with `, cmd with ^): write the command on one line"
+
+# An install with a package manager only one system has fails, unless its procedure names an install for each of the
+# others, by its manager or the system's name, or installs with one that every system has (`anywhere`).
+[skill.os.installs]
+level = "fail"
+in = ["shell", "inline", "windows"]
+verbs = '(?:--?[\w-]+(?:=\S+)?\s+)*(?:install|add|-S\w*)(?![\w-])'
+anywhere = '(?<![\w.-])(?:uv\s+(?:pip\s+install|add|tool\s+install)|pipx?\s+install|python\s+-m\s+pip\s+install|conda\s+install|mamba\s+install|pixi\s+add)\b'
+message = "`{found}` installs on {family} only, and the procedure names no install for {missing}: give theirs too, or install with what every system has, such as `uv pip install`"
+families.macOS = { managers = ["brew"], names = ['\bmacOS\b', '\bMacs?\b', '\bOS X\b'] }
+families.Linux = { managers = ["apt-get", "apt", "dnf", "yum", "zypper", "pacman", "apk", "snap"], names = ['\bLinux\b', '\bDebian\b', '\bUbuntu\b', '\bFedora\b', '\bRHEL\b', '\bAlpine\b'] }
+families.Windows = { managers = ["winget", "choco", "scoop"], names = ['\bWindows\b'] }
+
 [summary]                      # W-60: book.toml's summary, one sentence in the catalog's shape
 words = [30, 55]               # the usual range, about 40 words: outside it, re-check manifest notes it and never fails
 

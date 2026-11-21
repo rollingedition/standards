@@ -1058,7 +1058,9 @@ def library_problems(cs: ConceptSet, slug: str, lib: Library, known: set[str],
     - A relation to another context's concept names one a released book defines; one retired names its successor.
     - Notes, never problems, so one book's change never stops another book's pull request: a released concept that
       shares its address with no agreement, an agreement whose sentence the other book has since changed or that names
-      a book no longer defining the address, and the same term or alias in another book, in another context, unlinked."""
+      a book no longer defining the address, and, for a concept new to this book, the same term or alias in another
+      book, in another context, unlinked: a released one has been read across books already, and a different meaning
+      would otherwise be listed again on every pull request."""
     problems: list[str] = []
     notes: list[str] = []
     had = set(released.addresses) if released else set()
@@ -1098,7 +1100,7 @@ def library_problems(cs: ConceptSet, slug: str, lib: Library, known: set[str],
             elif to not in lib.defined:
                 problems.append(f"{where}: check 4: {r.type} {short(to)}: no released book defines it")
         seen = set()
-        for name in c.names:
+        for name in c.names if address not in had else ():   # a released concept has been read across books already
             for d in lib.names.get(name.casefold(), []):
                 if d.book == slug or d.address == address or d.address in linked or d.address in seen:
                     continue

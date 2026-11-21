@@ -798,10 +798,14 @@ def test_the_same_term_in_another_book_and_context_is_a_note_until_linked(tmp_pa
                                      "Precision at k is the share of the top k that is relevant.")), monkeypatch=monkeypatch)
     assert found == [] and any("ml-book also defines 'precision@k', as machine-learning/precision-at-k" in n for n in notes)
     assert not any("'label'" in n for n in notes)                       # linked already, with close-to
+    released = concepts.Released("2026.11.1", {BASE + "search-and-recommendation/precision-at-k"}, {})
+    found, notes = across(book, lib(("ml-book", "machine-learning/precision-at-k", "precision@k", "Precision at k is...")),
+                          released, monkeypatch=monkeypatch)
+    assert not any("also defines 'precision@k'" in n for n in notes)  # released: read across books already
 
 
-def test_until_every_book_records_its_agreements_check_4_lists_and_passes(tmp_path, monkeypatch, capsys):
-    assert concepts.settings()["library"]["fails"] is False          # the founder's hard check comes after the pass
+def test_check_4_fails_now_and_fails_false_would_list_and_pass(tmp_path, monkeypatch, capsys):
+    assert concepts.settings()["library"]["fails"] is True           # a hard check, once every book had its agreements
     book = bookfmt.load_book(SAMPLER)
     found, notes = across(book, lib(DCG), fails=False, monkeypatch=monkeypatch)
     assert found == [] and any("dcg is third-book's too" in n for n in notes)

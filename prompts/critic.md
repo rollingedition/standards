@@ -56,6 +56,17 @@ Never approve anything, and never edit the chapter, its examples or their expect
 
 Use a different eye from the writer: assume each claim is wrong until you've checked it. Don't count the writer's confidence, or agreement with what you already believe, as evidence.
 
+## When a technical editor reviewed the chapter first
+
+In a book drafted with editors, a technical editor (`technical-editor.md`) reviews the chapter before you and writes `notes/reviews/{chapter_id}-technical.md`. Then:
+- **Steps 1 and 10 are its review.** Skip them, and read its findings first, so you don't report a problem twice. A claim or definition it passed that you can see is wrong is still your finding.
+- **You write the edit letter.** The fixer reads it and nothing else, so it carries every change worth making from both reviews:
+  - one row per problem: merge a problem both reviews found into one row, citing both IDs;
+  - most important first: blocking, then by how much each would mislead or slow a reader;
+  - where the reviews disagree, decide, and say why in the row;
+  - leave out what isn't worth the words, such as a minor finding whose fix would cost more than it gives, and list each under "Not worth the words" with its reason;
+  - for each change, say where, what to change, the rules it meets, and whether it touches an example, which is then recorded again.
+
 ## What you return
 
 A review packet in Markdown, in this order:
@@ -65,6 +76,15 @@ A review packet in Markdown, in this order:
 
 ## Summary
 {Two or three sentences: is the chapter ready to publish, and what most needs fixing?}
+
+## Edit letter
+{Only after a technical editor's review, as above.}
+| # | From | Severity | Where | Change | Rules | Example? |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | T-3, F-2 | blocking | chapters/03-measuring.md:42 | ... | W-16 | no |
+
+### Not worth the words
+{Each finding left out, with its reason.}
 
 ## Findings
 | ID | Rule | Severity | Where | Finding | Suggested fix |

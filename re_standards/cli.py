@@ -600,6 +600,18 @@ def cmd_licences(args) -> int:
     return report("Licences", problems, "this repository's LICENSE and LICENSE-TEXT are " + ("written" if args.write else "up to date"))
 
 
+def cmd_rules(args) -> int:
+    from . import digest
+    sections = digest.parse(digest.readme_path().read_text(encoding="utf-8"))
+    full_sections = set(args.section or [])
+    full_rules = {r.strip().upper() for v in args.rule or [] for r in v.split(",") if r.strip()}
+    problems = digest.unknown(sections, full_sections, full_rules)
+    if problems:
+        return report("Rules", problems, "")
+    sys.stdout.write(digest.cut(sections, full_sections, full_rules))
+    return 0
+
+
 def cmd_community(args) -> int:
     problems = community.write(Path(args.out))
     return report("Community files", problems, f"the organization's community files are written to {args.out}")
@@ -796,6 +808,12 @@ def build_parser() -> argparse.ArgumentParser:
                                         "(the code's) and LICENSE-TEXT (the text's, for writing/ and prompts/)")
     s.add_argument("--write", action="store_true", help="regenerate the files instead of checking them")
     s.set_defaults(fn=cmd_licences)
+
+    s = sub.add_parser("rules", help="the writing standards cut for one task: every rule as a line, and in full the "
+                                     "sections and rules it applies, so a subagent never opens the whole README")
+    s.add_argument("--section", type=int, action="append", metavar="N", help="a numbered section to print in full")
+    s.add_argument("--rule", action="append", metavar="W-N[,W-N]", help="rules to print in full, such as W-26,W-63")
+    s.set_defaults(fn=cmd_rules)
 
     s = sub.add_parser("community", help="write the organization's community files for its .github repository")
     s.add_argument("--out", required=True, help="a checkout of the organization's .github repository")

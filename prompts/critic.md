@@ -7,7 +7,7 @@ Never approve anything, and never edit the chapter, its examples or their expect
 ## What you receive
 
 - the chapter's Markdown, with its bindings filled in and unfilled
-- every example it embeds, with its code and recorded output
+- every example it embeds, with its code and recorded output, and each figure an example draws, with its alt text and caption
 - the book's `book.toml`, `examples/requirements.txt` and any `recordings/` manifests
 - the lint result from `re-check style` and the example results from `re-check examples`
 - the chapter's narration: `narration/{chapter_id}.toml`, `narration/lexicon.toml`, the spoken script from `re-check narration --script`, the narration check's warnings and the narration report
@@ -22,21 +22,27 @@ Never approve anything, and never edit the chapter, its examples or their expect
 
    Then check the claim against its support. Mark it **holds**, **partly holds** (say what's wrong) or **contradicted** (quote the evidence). A citation you can't open, or that doesn't support the claim, is a finding.
 2. **Prose against outputs.** Every number, name and behaviour the prose attributes to an example matches the recorded output. Numbers that should be bindings (W-26) and aren't are findings.
-3. **The house pattern (W-8 to W-16).** Check each section: does it explain, then make it concrete with the running case, then close with a working rule that says what to do, when, and when to do something else? Does it show the failure where there is one? Does it take a position?
-4. **Level (W-1, W-46, W-47).** Is the depth right for the book's level? A Foundations chapter that uses a library before building the idea, or an In practice chapter that teaches basics, is a finding.
-5. **Examples (W-17 to W-23, W-48).** One idea each, realistic data, printing what the prose discusses, current idioms. Recorded outputs have complete manifests and a model choice the chapter explains.
-6. **Standing alone (W-40, W-41).** Read each section as if it were the only one fetched. List any that depend on an earlier section without a link.
-7. **Reading flow (W-49 to W-53).** Read each section as a newcomer would. List every sentence that uses a name before the text has said what it stands for, every reference whose meaning the reader has to guess ("the data", "the results"), every sentence you had to read twice, and every section whose first sentence doesn't connect it to what came before. Quote each one and propose the clearer sentence.
-8. **Spoken descriptions (W-54 to W-56).** Check each description against its example's code and recorded output, or against its formula or table. A description claims nothing the output doesn't show, and quotes its numbers as bindings. Read the narration report: every paragraph that failed its check, and whether its fix went through the lexicon or a description and never rewrote the text. A lexicon reading that says a term wrongly is a finding.
-9. **Research and how settled it is (W-69).** For each claim that rests on a paper, check that what the book does matches how settled the paper is:
+3. **Figures (W-82, W-39).** A figure invites description, and description is where a writer overreaches: when a chapter first gained figures, six of the seven factual errors its fact-check found were about what a figure shows. Check each sentence about a figure, its alt text and its caption against what its example draws and prints:
+   - the span and the series: a sentence about eight weeks under a figure of two, or a line the code doesn't draw, is blocking;
+   - the shape: a dip called a trend, or a level called a drift, is blocking unless a printed value shows it;
+   - the numbers: each comes from a printed line, bound, never read off the picture.
+
+   Then check the figure itself: does it carry a concept the chapter teaches, is it drawn from the book's own data, does the prose say what to see in it next to it, does a listener get its point from the prose without the picture (W-54), and does colour alone carry no meaning? A typed figure number is a finding.
+4. **The house pattern (W-8 to W-16).** Check each section: does it explain, then make it concrete with the running case, then close with a working rule that says what to do, when, and when to do something else? Does it show the failure where there is one? Does it take a position?
+5. **Level (W-1, W-46, W-47).** Is the depth right for the book's level? A Foundations chapter that uses a library before building the idea, or an In practice chapter that teaches basics, is a finding.
+6. **Examples (W-17 to W-23, W-48).** One idea each, realistic data, printing what the prose discusses, current idioms. Recorded outputs have complete manifests and a model choice the chapter explains.
+7. **Standing alone (W-40, W-41).** Read each section as if it were the only one fetched. List any that depend on an earlier section without a link.
+8. **Reading flow (W-49 to W-53).** Read each section as a newcomer would. List every sentence that uses a name before the text has said what it stands for, every reference whose meaning the reader has to guess ("the data", "the results"), every sentence you had to read twice, and every section whose first sentence doesn't connect it to what came before. Quote each one and propose the clearer sentence.
+9. **Spoken descriptions (W-54 to W-56).** Check each description against its example's code and recorded output, or against its formula or table. A description claims nothing the output doesn't show, and quotes its numbers as bindings. Read the narration report: every paragraph that failed its check, and whether its fix went through the lexicon or a description and never rewrote the text. A lexicon reading that says a term wrongly is a finding.
+10. **Research and how settled it is (W-69).** For each claim that rests on a paper, check that what the book does matches how settled the paper is:
    - a single preprint is labelled and changes no recommendation;
    - a measured claim is the book's own run;
    - a changed or reversed recommendation has replicated or peer-reviewed support and the book's own reproduction;
    - disagreeing studies appear with their setups.
 
    A number copied from a paper into a result, or a recommendation moved by one preprint, is blocking.
-10. **Everything else a critic checks:** the rules marked *critic* in the standards, including "now" and "new" (W-24), superlatives (W-35), voice (W-34, W-37) and code font (W-38).
-11. **Craft (W-61 to W-68).** Read the chapter as a reader of a good textbook would, and judge whether it reads like one. Compare it with the after passages in the exemplars.
+11. **Everything else a critic checks:** the rules marked *critic* in the standards, including "now" and "new" (W-24), superlatives (W-35), voice (W-34, W-37) and code font (W-38).
+12. **Craft (W-61 to W-68).** Read the chapter as a reader of a good textbook would, and judge whether it reads like one. Compare it with the after passages in the exemplars.
     - Quote the three paragraphs that read least naturally, say in a line what makes each one stiff, and propose the opening sentence an author would write.
     - Results (W-61): each paragraph that reports results opens with its point and quotes the numbers that show it, not every number printed.
     - Sources (W-62): every quotation that could be said in the book's own words, and every sentence with a link on each clause.

@@ -166,9 +166,22 @@ class ExampleResult:
     seconds: float = 0.0
     seeds: list = field(default_factory=list)      # the hash seeds it ran under, the first one's output kept here
     seed_diff: str = ""                            # how another seed's output differed from the first's, if it did
+    # the figures it wrote (figures.py), each {name, file, sha256, passing}, and how one that fails differs: in its report
+    # only when it wrote one
+    figures: list = field(default_factory=list)
+    svgs: dict = field(default_factory=dict, repr=False, compare=False)   # name -> the SVG it wrote; never reported
 
     def manifest_entry(self) -> dict:
         return {"passing": self.passing, "versions": self.versions, "direct": self.direct}
+
+    def report_entry(self) -> dict:
+        """The result as a run's report has it: its figures only when it wrote some, so a book without figures reports
+        what it always did."""
+        out = asdict(self)
+        out.pop("svgs")
+        if not out["figures"]:
+            out.pop("figures")
+        return out
 
 
 def normalize_output(text: str) -> str:
@@ -649,6 +662,12 @@ def same_under_seeds(first: ExampleResult, others: list[ExampleResult]) -> Examp
         if first.seed_diff:
             continue
         a, b = normalize_output(first.stdout), normalize_output(other.stdout)
+        drawn = sorted(n for n in set(first.svgs) | set(other.svgs) if first.svgs.get(n) != other.svgs.get(n))
+        if drawn and a == b and first.exit_code == other.exit_code:
+            first.seed_diff = (f"the figure depends on the hash seed: {', '.join(f'figures/{n}.svg' for n in drawn)} "
+                               f"differs under seeds {first.seeds[0]} and {other.seeds[0]}")
+            first.passing = False
+            continue
         if a != b or first.exit_code != other.exit_code:
             seed_a, seed_b = first.seeds[0], other.seeds[0]
             diff = "\n".join(difflib.unified_diff(a.splitlines(), b.splitlines(),
@@ -687,6 +706,8 @@ def run_one(book: Book, eid: str, runtime: Runtime, backend: Backend, timeout: f
     with tempfile.TemporaryDirectory(prefix="re-example-") as tmp:
         work = Path(tmp) / "examples"
         shutil.copytree(book.root / "examples", work, ignore=shutil.ignore_patterns("*.out", "__pycache__", ".python-version", "requirements.txt"))
+        drawn = work / drawn_folder()
+        shutil.rmtree(drawn, ignore_errors=True)        # the committed figures stay out, so what's here after is drawn
         shutil.copy(HARNESS, work / ".re_harness.py")
         cmd, env = backend.command(runtime, work, f"{eid}.py", seed)
         start = time.monotonic()
@@ -699,12 +720,63 @@ def run_one(book: Book, eid: str, runtime: Runtime, backend: Backend, timeout: f
         report = {}
         if (work / ".re_report.json").exists():
             report = json.loads((work / ".re_report.json").read_text())
+        svgs = {p.stem: p.read_text(encoding="utf-8", errors="replace")
+                for p in sorted(drawn.glob("*.svg"))} if drawn.is_dir() else {}
     same, diff = compare(eid, stdout, example.expected)
+    found, differences = compare_figures(book, svgs)
     versions = dict({"python": report.get("python", runtime.python)}, **dict(sorted(report.get("loaded", {}).items())))
     tail = "\n".join(stderr.strip().splitlines()[-15:])
-    return ExampleResult(eid, passing=(code == 0 and same), exit_code=code, stdout=stdout, expected=example.expected,
-                         diff=diff if code == 0 else "", stderr_tail=tail, versions=versions,
-                         direct=report.get("direct", []), seconds=seconds, seeds=[seed])
+    if code == 0 and differences:
+        diff = "\n".join(filter(None, [diff, *differences]))
+    return ExampleResult(eid, passing=(code == 0 and same and not differences), exit_code=code, stdout=stdout,
+                         expected=example.expected, diff=diff if code == 0 else "", stderr_tail=tail, versions=versions,
+                         direct=report.get("direct", []), seconds=seconds, seeds=[seed], figures=found, svgs=svgs)
+
+
+def drawn_folder() -> str:
+    """Where in examples/ an example's figures go: data/figures.toml's [format] folder, inside the examples' copy."""
+    from . import figures
+    return Path(figures.folder()).relative_to("examples").as_posix()
+
+
+def compare_figures(book: Book, svgs: dict[str, str]) -> tuple[list[dict], list[str]]:
+    """Each figure an example wrote, compared with the book's (figures.compare): its report entry, and how each one
+    that fails differs. One the book doesn't have yet fails until it's recorded."""
+    from . import figures
+    entries, differences = [], []
+    for name, text in sorted(svgs.items()):
+        rel = f"{figures.folder()}/{name}.svg"
+        committed = book.root / rel
+        if not committed.is_file():
+            why = [f"{rel} isn't in the book yet: record it with re-check examples --record"]
+        else:
+            why = figures.compare(committed.read_text(encoding="utf-8", errors="replace"), text)
+        entry = {"name": name, "file": rel, "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(), "passing": not why}
+        if why:
+            entry["differences"] = why
+            differences += [f"{rel}: {w}" for w in why]
+        entries.append(entry)
+    return entries, differences
+
+
+def record_figures(book: Book, result: ExampleResult) -> list[str]:
+    """What `--record` writes for an example besides its output: each figure it drew, and the removal of each one its
+    recorded output named before that it no longer draws. The files written, relative to the book."""
+    from . import figures
+    folder = book.root / figures.folder()
+    written = []
+    for name, text in sorted(result.svgs.items()):
+        path = folder / f"{name}.svg"
+        if not path.is_file() or path.read_text(encoding="utf-8", errors="replace") != text:
+            folder.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+            written.append(f"{figures.folder()}/{name}.svg")
+    for name in figures.printed(result.expected):
+        path = folder / f"{name}.svg"
+        if name not in result.svgs and path.is_file():
+            path.unlink()
+            written.append(f"{figures.folder()}/{name}.svg (removed)")
+    return written
 
 
 def results_json(results: list[ExampleResult], runtime: dict, outcome: str | None = None) -> dict:
@@ -713,7 +785,7 @@ def results_json(results: list[ExampleResult], runtime: dict, outcome: str | Non
     be built for another reason)."""
     out = {"outcome": outcome} if outcome else {}
     return {**out, "runtime": runtime, "passing": sum(r.passing for r in results), "total": len(results),
-            "examples": [asdict(r) for r in results]}
+            "examples": [r.report_entry() for r in results]}
 
 
 def describe_versions(versions: dict, direct: list[str]) -> str:

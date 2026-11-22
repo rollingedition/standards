@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import addressed as addressed_check, affected, base_image, bookfmt, catalog, checks, community, data_path, examples, kit, readme, resolve, rules, skill, spoken, style, voice
-from . import commands, concepts, labscripts, stack
+from . import commands, concepts, figures, labscripts, stack
 from . import models as model_files
 
 
@@ -114,7 +114,9 @@ def cmd_section_ids(args) -> int:
         problems = checks.check_section_ids(head, base, previous)
     n = len(head.ids())
     against = ", ".join(x for x in ("the base branch" if base else "", f"Edition {previous['edition']}" if previous else "") if x)
-    return report("Section IDs", problems, f"{n} IDs are valid and unique" + (f"; none lost since {against}" if against else f" ({note})"))
+    drawn = f"; {len(head.figures)} figure(s), each drawn by an example its chapter embeds" if head.figures else ""
+    return report("Section IDs", problems, f"{n} IDs are valid and unique" + (f"; none lost since {against}" if against else f" ({note})")
+                  + drawn)
 
 
 def cmd_kind_label(args) -> int:
@@ -224,7 +226,8 @@ def run_examples_check(args, book: bookfmt.Book, backend: examples.Backend, seed
         label = examples.describe_versions(r.versions, r.direct)
         if args.record and r.exit_code == 0 and not r.seed_diff:
             (book.root / "examples" / f"{r.example_id}.out").write_text(examples.normalize_output(r.stdout), encoding="utf-8")
-            print(f"recorded  {r.example_id}  ({label})")
+            drawn = examples.record_figures(book, r)            # and each figure it drew (figures.py)
+            print(f"recorded  {r.example_id}  ({label})" + (f": {', '.join(drawn)}" if drawn else ""))
             continue
         print(f"{'pass' if r.passing else 'FAIL'}  {r.example_id}  ({label})  {r.seconds:.1f}s")
         if not r.passing:
@@ -522,6 +525,26 @@ def cmd_kit(args) -> int:
     return report("Book kit", problems, "the kit's files are in place and unchanged", warn=not draft)
 
 
+def cmd_figures(args) -> int:
+    """Figures drawn by examples (figures.py): with --write, the shared style every figure is drawn with,
+    examples/lib/figures.py; without, the format's problems, which the section-ID check fails too, and the writing's,
+    which `re-check style` lists (W-39, W-82)."""
+    root = Path(args.book)
+    if args.write:
+        written = figures.write_helper(root)
+        for rel in written:
+            print(f"wrote  {rel}")
+        return report("Figures", [], f"the shared style is in place ({len(written)} file(s) written)")
+    book = bookfmt.load_book(root)
+    n = len(book.figures)
+    rc = report("Figures", figures.problems(book), f"{n} figure(s), each drawn by an example its chapter embeds, "
+                "and the shared style is the standards'" if n else "no figures")
+    rc2 = report_dated("Figures, as the writing standards hold them", figures.writing_problems(book),
+                       "every figure has alt text that states its point, a caption and a mention in the prose",
+                       book.root, book.manifest, args.base_ref)
+    return rc or rc2
+
+
 def cmd_readme(args) -> int:
     book = bookfmt.load_book(Path(args.book))
     problems, later = readme.held_for_maintainer(book, readme.check(book, write=args.write))
@@ -737,6 +760,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--chapter", action="append", default=[], metavar="ID",
                    help="with --write: a chapter's ID, in the plan's order, for chapters/NN-ID.md and narration/ID.toml")
     s.set_defaults(fn=cmd_kit)
+
+    s = sub.add_parser("figures", help="figures drawn by examples: each drawn by an example its chapter embeds, safe to "
+                       "show, with alt text, a caption and a mention; --write writes the shared style, "
+                       "examples/lib/figures.py")
+    s.add_argument("--book", default=".")
+    s.add_argument("--write", action="store_true", help="write examples/lib/figures.py, the shared style")
+    s.add_argument("--base-ref", help="the pull request's base: a dated rule holds a released book from the change "
+                                      "that makes its next content edition")
+    s.set_defaults(fn=cmd_figures)
 
     s = sub.add_parser("readme", help="the generated front page: README.md, CITATION.cff, LICENSE, LICENSE-CODE and renovate.json")
     s.add_argument("--book", default=".")

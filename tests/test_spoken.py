@@ -378,7 +378,7 @@ def test_a_released_chapter_reads_as_the_first_voice_samples_did(primer):
     by_kind = {k: sum(line.kind == k for line in lines) for k in spoken.KINDS}
     assert by_kind == {"opening": 1, "heading": 11, "prose": 47, "item": 7, "working-rule": 10, "quote": 0,
                        "example": 10, "block": 1, "table": 0, "ending": 1, "credits": 0,
-                       "step": 0, "check": 0, "file": 0}                         # a terminal book's alone
+                       "step": 0, "check": 0, "file": 0, "figure": 0}                         # a terminal book's alone
     said = "\n".join(texts(lines))
     for words in ("scores its rankers against thirteen thousand and seventy-seven judgments",
                   "Example: word match versus judgment. Its code and output are on the page.",
@@ -413,6 +413,14 @@ def test_a_price_keeps_a_comma_after_it_and_a_chain_of_numbers_split_by_slashes_
     assert speaker.say("It costs $30, about a dollar a day.").startswith("It costs thirty dollars, about")
     assert speaker.say("Wins, losses and ties: 9 / 14 / 7.") == "Wins, losses and ties: nine, fourteen, seven."
     assert speaker.say("The score is x / y here.") == "The score is x over y here."
+
+
+def test_a_clock_time_reads_as_a_listener_says_it(tmp_path):
+    speaker = spoken.Speaker(spoken.load_rules(), spoken.load_narration(tiny(tmp_path).root))
+    assert speaker.say("The day peaks at 18:00 and bottoms out at 05:00.") == (
+        "The day peaks at eighteen hundred and bottoms out at oh five hundred.")
+    assert speaker.say("It ran at 14:32 and 09:05.") == "It ran at fourteen thirty-two and oh nine oh five."
+    assert speaker.say("A ratio of 3:1 and a time of 10:30:15 stay as they were.").startswith("A ratio of three:one")
 
 
 def test_a_date_without_a_year_reads_as_the_month_and_its_day(tmp_path):

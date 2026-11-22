@@ -30,7 +30,7 @@ import yaml
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
-from . import authorship
+from . import authorship, figures as figure_format
 from . import stack as stack_pins, steps as step_format
 from .catalog import load_book as load_manifest
 
@@ -38,10 +38,11 @@ ID_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 MAX_ID_LENGTH = 64
 HEADING_ID = re.compile(r"\s*\{#([^}]*)\}\s*$")
 EMBED_HREF = re.compile(r"^(?:\.\./)?examples/([^/]+)\.py$")
-# Bindings (writing standards W-25, W-26): values the build fills in, so prose never types them.
+# Bindings (writing standards W-25, W-26, W-82): values the build fills in, so prose never types them.
 #   {{out:EXAMPLE_ID:LABEL}}  the value on the "LABEL: value" line of that example's recorded output
 #   {{version:PACKAGE}}       the version examples/requirements.txt pins, or a terminal book's examples/stack.toml
-BINDING = re.compile(r"\{\{\s*(out|version)\s*:\s*([^{}]+?)\s*\}\}")
+#   {{fig:NAME}}              the figure's number, "Figure 4.1": its chapter's number, then its order in the chapter
+BINDING = re.compile(r"\{\{\s*(out|version|fig)\s*:\s*([^{}]+?)\s*\}\}")
 PIN = re.compile(r"^\s*([A-Za-z0-9_.\-\[\]]+?)\s*==\s*([^\s;#]+)")
 SECTION_LEVELS = (2, 3)
 
@@ -104,6 +105,38 @@ class Embed:
 
 
 @dataclass
+class FigureEmbed:
+    """A paragraph that is only an image: a figure, `![alt](../examples/figures/NAME.svg "caption")`, or, with no name,
+    an image no example draws, which the format refuses (figures.problems)."""
+    name: str | None            # the figure's name, from its file; None for any other image
+    src: str
+    alt: str
+    caption: str                # the image's title, after its address
+    section_id: str | None      # None when embedded in the chapter's opening text
+    start: int                  # 0-based body line range of the paragraph
+    end: int
+
+
+@dataclass
+class Figure:
+    """A figure as the build numbers it: "Figure 4.1" is the fourth chapter's first."""
+    name: str
+    chapter_id: str
+    section_id: str | None
+    number: str                 # "4.1"
+    alt: str
+    caption: str
+    file: str                   # its SVG, relative to the book root
+
+    @property
+    def anchor(self) -> str:
+        return figure_format.anchor(self.name)
+
+    def label(self, word: str | None = None) -> str:
+        return figure_format.label(self.number, word)
+
+
+@dataclass
 class Chapter:
     chapter_id: str
     title: str
@@ -117,6 +150,8 @@ class Chapter:
     opening: str = field(default="", repr=False)   # the opening text its sha256 covers, before normalizing
     step_embeds: list[Embed] = field(default_factory=list)  # its steps, checks and files; `embeds` stays Python's
     setup: list[str] = field(default_factory=list)          # front matter: earlier steps that bring a fresh start here
+    figures: list[FigureEmbed] = field(default_factory=list)   # its figures, and any other paragraph that's an image
+    images: list[tuple[int, str]] = field(default_factory=list)   # (body line, address) of an image inside a paragraph
 
 
 @dataclass
@@ -141,6 +176,7 @@ class Book:
     output_problems: list[str] = field(default_factory=list)  # missing expected outputs: the examples check
     steps: dict[str, step_format.Step] = field(default_factory=dict)     # a terminal book's steps and checks
     files: dict[str, step_format.FileRef] = field(default_factory=dict)  # and the files they read
+    figures: dict[str, Figure] = field(default_factory=dict)             # its figures by name, in reading order
 
     @property
     def slug(self) -> str:
@@ -209,6 +245,12 @@ class Book:
 
     def binding_value(self, kind: str, ref: str) -> tuple[str | None, str | None]:
         """(value, None) for a binding that resolves, or (None, why) for one that doesn't."""
+        if kind == "fig":
+            name = ref.strip()
+            fig = self.figures.get(name)
+            return (fig.label(), None) if fig else (None, f"{{{{fig:{ref}}}}}: there is no figure {name!r} in this book; "
+                                                          "a chapter embeds it as ![its point](../examples/figures/"
+                                                          f"{name}.svg \"Its caption\")")
         if kind == "version":
             name = ref.strip().lower().replace("_", "-")
             v = self.pins.get(name)
@@ -230,11 +272,28 @@ class Book:
                           f"{label!r}; print exactly one \"{label}: value\" line")
         return hits[0], None
 
-    def bind(self, text: str, keep: tuple[str, ...] = ()) -> str:
+    def bind(self, text: str, keep: tuple[str, ...] = (), figure: Callable[[Figure], str] | None = None) -> str:
         """The text with every binding filled in, but those of the kinds in `keep`, which stay as written. Unresolved
-        bindings stay visible; binding_problems reports them."""
-        return BINDING.sub(lambda m: m.group(0) if m.group(1) in keep else
-                           (self.binding_value(m.group(1), m.group(2))[0] or m.group(0)), text)
+        bindings stay visible; binding_problems reports them. A figure's is its label, "Figure 4.1", or what `figure`
+        makes of it, such as a link to it."""
+        def one(m: re.Match) -> str:
+            kind, ref = m.group(1), m.group(2)
+            if kind in keep:
+                return m.group(0)
+            if kind == "fig" and figure is not None and ref.strip() in self.figures:
+                return figure(self.figures[ref.strip()])
+            return self.binding_value(kind, ref)[0] or m.group(0)
+        return BINDING.sub(one, text)
+
+    def figure_link(self, word: str | None = None) -> Callable[[Figure], str]:
+        """For bind: each figure's label as a Markdown link to its anchor, "[Figure 4.1](#figure--NAME)", in the word of
+        a page's language (`word`, English unless given). A renderer's link turns the anchor into the figure's page."""
+        return lambda fig: f"[{fig.label(word)}](#{fig.anchor})"
+
+    def figure_at(self, anchor: str) -> Figure | None:
+        """The figure an anchor names (figures.anchor), or None."""
+        name = figure_format.from_anchor(anchor)
+        return self.figures.get(name) if name else None
 
     def unit_source(self, unit: str) -> str | None:
         """A unit's source text, the text its sha256 covers before normalizing: a chapter's opening, under the chapter's
@@ -349,6 +408,26 @@ def _embed_id(tokens: list[Token], i: int) -> str | None:
     return m.group(1) if m else None
 
 
+def _figure_ref(tokens: list[Token], i: int) -> tuple[str, str, str] | None:
+    """(address, alt text, caption) when tokens[i] opens a paragraph that is only an image: a figure, when its address
+    is one of examples/figures/ (figures.name_of)."""
+    if tokens[i].type != "paragraph_open" or i + 2 >= len(tokens):
+        return None
+    children = [c for c in (tokens[i + 1].children or []) if not (c.type == "text" and not c.content.strip())]
+    if len(children) != 1 or children[0].type != "image":
+        return None
+    image = children[0]
+    return str(image.attrGet("src") or ""), image.content, str(image.attrGet("title") or "")
+
+
+def figure_name(tokens: list[Token], i: int) -> tuple[str, str, str] | None:
+    """(name, alt text, caption) when tokens[i] opens a figure's paragraph, as a renderer reads it: its alt text and
+    caption as the page has them, bindings filled in."""
+    ref = _figure_ref(tokens, i)
+    name = figure_format.name_of(ref[0]) if ref else None
+    return (name, ref[1], ref[2]) if name else None
+
+
 def parse_chapter(path: Path, rel: str, order: int, first_section_order: int, md: MarkdownIt) -> tuple[Chapter | None, list[str]]:
     return parse_chapter_text(path.read_text(encoding="utf-8"), rel, order, first_section_order, md)
 
@@ -377,17 +456,27 @@ def parse_chapter_text(text: str, rel: str, order: int, first_section_order: int
     headings: list[tuple[int, int, str, str | None]] = []    # (level, body line, text, id)
     embeds: list[tuple[int, int, str]] = []                   # (start, end, example id)
     parts: list[tuple[int, int, str, str]] = []               # (start, end, kind, id): steps, checks and files
+    pictures: list[tuple[int, int, str, str, str]] = []       # (start, end, src, alt, caption): a paragraph that's an image
+    images: list[tuple[int, str]] = []                        # (line, src): an image inside other text
+    in_figure, last_line = set(), 0
     for i, tok in enumerate(tokens):
+        last_line = tok.map[0] if tok.map else last_line
         if tok.type == "heading_open":
             level = int(tok.tag[1])
             text_, hid = _heading_text(tokens[i + 1])
             headings.append((level, tok.map[0], text_, hid))
+        elif tok.type == "inline":
+            if i not in in_figure:
+                images += [(last_line, str(c.attrGet("src") or "")) for c in tok.children or [] if c.type == "image"]
         else:
             eid = _embed_id(tokens, i)
             if eid is not None:
                 embeds.append((tok.map[0], tok.map[1], eid))
             elif (ref := _step_ref(tokens, i)) is not None:
                 parts.append((tok.map[0], tok.map[1], *ref))
+            elif (pic := _figure_ref(tokens, i)) is not None:
+                pictures.append((tok.map[0], tok.map[1], *pic))
+                in_figure.add(i + 1)
 
     where = lambda body_line: f"{rel}:{body_line + offset + 1}"   # noqa: E731
     h1 = [h for h in headings if h[0] == 1]
@@ -440,6 +529,14 @@ def parse_chapter_text(text: str, rel: str, order: int, first_section_order: int
         chapter.embeds.append(Embed(eid, owner.section_id if owner else None, start, end))
         if owner:
             owner.example_ids.append(eid)
+    for start, end, src, alt, caption in pictures:
+        owner = None
+        for s in sections:
+            if s.line - offset - 1 <= start:
+                owner = s
+        chapter.figures.append(FigureEmbed(figure_format.name_of(src), src, alt, caption,
+                                           owner.section_id if owner else None, start, end))
+    chapter.images = images
     if parts or "setup" in meta:
         problems += _chapter_parts(chapter, meta, parts, rel)
     return chapter, problems
@@ -471,6 +568,21 @@ def load_redirects(root: Path) -> tuple[dict[str, str], list[str]]:
     if not isinstance(data, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in data.items()):
         return {}, ["redirects.yml must map each retired ID to its successor ID"]
     return dict(data), []
+
+
+def number_figures(chapters: list[Chapter]) -> dict[str, Figure]:
+    """Every figure the chapters embed, numbered as the build numbers them: the chapter's number, then the figure's
+    order in it. A name embedded again keeps its first place; the format's check says so (figures.problems)."""
+    out: dict[str, Figure] = {}
+    for c in chapters:
+        n = 0
+        for f in c.figures:
+            if f.name is None or f.name in out:
+                continue
+            n += 1
+            out[f.name] = Figure(f.name, c.chapter_id, f.section_id, f"{c.order}.{n}", f.alt, f.caption,
+                                 f"{figure_format.folder()}/{f.name}.svg")
+    return out
 
 
 def load_book(root: Path) -> Book:
@@ -547,7 +659,8 @@ def load_book(root: Path) -> Book:
     redirects, redirect_problems = load_redirects(root)
     problems += redirect_problems
     problems += authorship.chapter_problems(manifest, [c.chapter_id for c in chapters])   # an author's owned chapters
-    book = Book(root, manifest, chapters, examples, redirects, problems, output_problems, steps, files)
+    book = Book(root, manifest, chapters, examples, redirects, problems, output_problems, steps, files,
+                number_figures(chapters))
     live = book.ids()
     for old, new in redirects.items():
         if old in live:
@@ -569,7 +682,8 @@ def render_chapter(chapter: Chapter, example_html: Callable[[str], str],
                    working_rule: tuple[str, ...] = (),
                    heading_after: Callable[[Section], str] = lambda s: "",
                    unit_wrap: Callable[[str], tuple[str, str] | None] | None = None,
-                   step_html: Callable[[str, str], str] | None = None) -> str:
+                   step_html: Callable[[str, str], str] | None = None,
+                   figure_html: Callable[[str, str, str], str] | None = None) -> str:
     """HTML for a chapter's body, without its # title. Section headings get their IDs; heading_extra's HTML goes
     inside a section's heading, and heading_after's right after it, so a heading can stay its title alone; embed
     paragraphs become whatever example_html returns; fenced code goes through code_block(code, language);
@@ -582,7 +696,9 @@ def render_chapter(chapter: Chapter, example_html: Callable[[str], str],
     given a unit's ID (the chapter's for its opening, a section's), returns the HTML to open before that unit and close
     after it, or None to leave it as it is: a translated page wraps each unit it shows in English. step_html, given a
     step's, check's or file's kind and ID, returns the HTML its paragraph becomes; without it, the paragraph stays a link.
-    A book with none renders the same with it or without."""
+    A book with none renders the same with it or without. figure_html, given a figure's name, alt text and caption as
+    the page has them (bound, and in a translation translated), returns the HTML its paragraph becomes; without it, the
+    paragraph stays an image."""
     md = new_markdown()
     if code_block is not None:
         md.options["highlight"] = lambda content, lang, attrs: code_block(content, lang)
@@ -648,6 +764,10 @@ def render_chapter(chapter: Chapter, example_html: Callable[[str], str],
             out.append(_html_block(step_html(*ref)))
             i += 3
             continue
+        if figure_html is not None and (fig := figure_name(tokens, i)) is not None:
+            out.append(_html_block(figure_html(*fig)))
+            i += 3
+            continue
         if working_rule and tok.type == "paragraph_open":
             _mark_working_rule(tok, tokens[i + 1], working_rule)
         if table_wrap and tok.type in ("table_open", "table_close"):
@@ -693,14 +813,21 @@ def _strip_heading_id(inline: Token) -> None:
 
 def machine_markdown(chapter: Chapter, example_block: Callable[[str], str],
                      bind: Callable[[str], str] | None = None,
-                     step_block: Callable[[Embed], str] | None = None) -> str:
+                     step_block: Callable[[Embed], str] | None = None,
+                     figure_block: Callable[[FigureEmbed], str] | None = None) -> str:
     """The chapter's Markdown for machines: IDs kept for citation, embeds replaced by the example itself,
     bindings filled in when bind is given. With step_block, each step, check and file is replaced by what it returns;
-    without it, each stays its link."""
+    without it, each stays its link. With figure_block, each figure is replaced by what it returns, bindings filled in
+    after; without it, each stays its image."""
     lines = chapter.body.split("\n")
-    embeds = chapter.embeds + (chapter.step_embeds if step_block is not None else [])
+    embeds: list = chapter.embeds + (chapter.step_embeds if step_block is not None else [])
+    if figure_block is not None:
+        embeds += [f for f in chapter.figures if f.name is not None]
     for e in sorted(embeds, key=lambda e: e.start, reverse=True):
-        block = example_block(e.example_id) if e.kind == "python" else step_block(e)
+        if isinstance(e, FigureEmbed):
+            block = figure_block(e)
+        else:
+            block = example_block(e.example_id) if e.kind == "python" else step_block(e)
         lines[e.start:e.end] = block.rstrip("\n").split("\n")
     text = "\n".join(lines).strip("\n") + "\n"
     return bind(text) if bind else text

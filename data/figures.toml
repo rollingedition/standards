@@ -1,0 +1,54 @@
+# Figures drawn by examples (re_standards/figures.py). A figure is an example's output: the example draws it from
+# the book's own data with the shared style in examples/lib/figures.py, which `re-check figures --write` generates from
+# this file, and writes it as examples/figures/{name}.svg. The examples check compares it with the committed one, as it
+# compares printed output, and a chapter embeds it as a paragraph that is only
+#
+#     ![alt text that states the figure's point](../examples/figures/{name}.svg "Its caption")
+#
+# Prose points to it with {{fig:NAME}}, which the build writes as "Figure 4.1": the chapter's number, then the figure's
+# order in the chapter. No figure number is ever typed.
+
+[format]
+folder = "examples/figures"            # where an example writes its figure and the book keeps it
+helper = "examples/lib/figures.py"     # the shared style, generated, never typed
+label = "Figure"                       # the word before a figure's number, in English: "Figure 4.1"
+anchor = "figure--"                    # before a figure's name in its anchor: a double hyphen, which no book ID has
+max_bytes = 100000                     # a figure's SVG at most this size: it's inlined in its chapter's page
+printed = "figure"                     # the label of the line save() prints, "figure: figures/{name}.svg", which names
+                                       # the figure the example writes
+
+[compare]
+# Numbers in an SVG's attributes may differ by this much, in user units, between machines: numpy's SIMD paths can round
+# the last bit differently on Intel and AMD, which moves a coordinate by far less. Text, elements and attribute names
+# never may, and nor may a number in text.
+tolerance = 0.05
+
+[check]
+# W-39: alt text states the figure's point, so it has at least this many words and isn't a file or figure name
+alt_min_words = 4
+# W-82: a caption names what the figure draws, in at most this many words
+caption_max_words = 25
+
+# How every figure is drawn. The SVG backend, with a fixed hash salt, text kept as text (svg.fonttype "none") and no
+# metadata date, writes the same bytes from the same data on every run and hash seed. Its text is laid out with the
+# fonts matplotlib ships alone, never a machine's own, so a figure is the same wherever it's drawn; the SVG names the
+# brand's sans first, which a page that has it sets the text in.
+[style]
+width_inches = 6.4                     # the reading column's width at matplotlib's 72 points an inch: 460.8 user units
+height_inches = 3.0                    # new_figure()'s height unless an example asks for another
+font_size = 10
+fonts = ["IBM Plex Sans", "DejaVu Sans"]   # the SVG's font-family; DejaVu Sans, which matplotlib ships, sets the layout
+hash_salt = "rolling-edition"
+grid_width = 0.6
+line_width = 1.4
+series = ["ACCENT", "INK", "MUTED"]    # SERIES in the helper: the palette's colours in the order a figure takes them
+
+# The colours the helper draws with: each a design token's light value (the platform's sites/brand/tokens.json, which a
+# test keeps these in step with). A page maps each to its token, so the dark theme draws the same figure in light ink.
+# One accent carries the series the prose names; the others are ink and muted ink, a third series dashed (W-39: never
+# colour alone). The status colours (pass, warn, fail) are never a series.
+[palette]
+INK = { token = "ink", value = "#1b1712" }               # text, and a series beside the accent
+MUTED = { token = "ink-muted", value = "#61574a" }       # axes, ticks, labels, and context
+RULE = { token = "rule", value = "#e2d5b8" }             # the grid
+ACCENT = { token = "edition", value = "#9a4a06" }        # the series the prose points to

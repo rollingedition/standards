@@ -71,8 +71,8 @@
    "label": "Security",
    "wikipedia": "Computer_security",
    "wikidata": "Q3510521",
-   "status": "planned",
-   "description": "Reserved for later books."
+   "status": "active",
+   "description": "Attacking and defending software and the systems around it: threat models, measured attacks and defences, secrets, the supply chain."
   }
  ],
  "skills": [

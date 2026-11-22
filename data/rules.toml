@@ -39,3 +39,4 @@ content = ["prose", "code"]
 "W-79" = { since = "2026-11-19", what = "a term used before its definition links to it" }
 "W-80" = { since = "2026-11-19", what = "concepts relate only through the fixed relation types" }
 "W-81" = { since = "2026-11-21", what = "a skill's commands run on macOS, Linux and Windows" }
+"W-82" = { since = "2026-11-22", what = "a figure is drawn by an example, numbered by the build and described from what it prints" }

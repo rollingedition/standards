@@ -4,7 +4,7 @@ An example's output depends on its own code, the local modules it imports, the l
 turn use, the files it reads, and the runtime. Against the base (the commit whose examples passed, such as a pull
 request's base), an example runs again when the change touches:
 
-- **its own files:** examples/{id}.py or examples/{id}.out;
+- **its own files:** examples/{id}.py or examples/{id}.out, or a figure its output names, examples/figures/NAME.svg;
 - **a local module it imports,** directly or through another: any .py file in a folder beside the examples, such as
   examples/lib/, or an example file another imports by name. Imports are read with `ast` from the example and from
   every local module it reaches, relative imports included;
@@ -46,7 +46,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import data_path
+from . import data_path, figures
 from .bookfmt import Book
 from .examples import DOCKERFILE, HARNESS, Runtime
 
@@ -378,6 +378,10 @@ def _classify(book: Book, change: Change) -> tuple[dict[str, list[str]], list[st
                 own.setdefault(stem, []).append("its code changed" if rel.endswith(".py") else "its recorded output changed")
         elif rel.endswith(".py"):
             modules.append(rel)
+        elif path.startswith(figures.folder() + "/") and path.endswith(".svg"):
+            name = path.rsplit("/", 1)[1][:-4]             # a figure: the examples that draw it (figures.py)
+            for eid in figures.drawn_by(book).get(name, []):
+                own.setdefault(eid, []).append("its recorded figure changed")
         else:
             other.append(path)
     if data:

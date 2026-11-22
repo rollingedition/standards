@@ -12,7 +12,7 @@ import tomllib
 import unicodedata
 from pathlib import Path
 
-from . import data_path, narrative, steps as step_format
+from . import data_path, figures, narrative, steps as step_format
 from .bookfmt import BINDING, HEADING_ID, Book
 
 WORD = re.compile(r"[A-Za-z0-9][A-Za-z0-9'’\-]*")
@@ -267,8 +267,8 @@ def _check_style(book: Book, cfg: dict | None = None) -> list[str]:
                     problems.append(f"{c.file}:{n}: W-40: links to #{target}, which isn't a chapter, section or example ID in this book")
             if FILE_LINK.search(plain):
                 problems.append(f"{c.file}:{n}: W-40: link other chapters by ID, as [text](#chapter-or-section-id), not by file name")
-            for alt, _ in IMAGE.findall(plain):
-                if not alt.strip():
+            for alt, src in IMAGE.findall(plain):           # a figure's alt text is figures.writing_problems'
+                if not alt.strip() and figures.name_of(src.split()[0] if src.split() else "") is None:
                     problems.append(f"{c.file}:{n}: W-39: every figure needs alt text that states its point")
             if TABLE_RULE.match(text):
                 columns = len(text.strip().strip("|").split("|"))
@@ -278,7 +278,8 @@ def _check_style(book: Book, cfg: dict | None = None) -> list[str]:
 
         problems += _working_rules(c.file, c.body, c.body_offset, cfg["working_rule"])
 
-    problems += [f"W-26: {p}" for p in book.binding_problems()]
+    problems += [f"{'W-82' if '{{fig:' in p else 'W-26'}: {p}" for p in book.binding_problems()]
+    problems += figures.writing_problems(book)          # W-39's alt text, and W-82: figures drawn by examples
     problems += narrative.problems(book, cfg)
 
     limit = lengths["example_lines"]

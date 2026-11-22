@@ -30,6 +30,7 @@ How a Rolling Edition book gets verified, in the open. This is the public, read-
 | `writing/` | The writing standards every book follows: rules with IDs, reasons and checks, and annotated exemplars |
 | `re_standards/addressed.py`, `data/addressed.toml` | Text written to an AI system rather than to readers: invisible characters anywhere in the book, and phrases such as "ignore previous instructions" in prose, HTML comments, link titles, image alt text and `book.toml`. Code and inline code are exempt from the phrases, so a chapter that quotes an attack puts it in inline code |
 | `data/writing.toml` | Limits and word lists for `re-check style`, the lint half of the writing standards |
+| `re_standards/figures.py`, `data/figures.toml` | Figures drawn by examples (see Figures): the shared style a book's figures are drawn with, generated into `examples/lib/figures.py`; the format's checks and the writing's (W-39, W-82); and the SVG a figure is, compared structurally between machines and cleaned of anything active for every surface that shows it |
 | `re_standards/spoken.py`, `data/narration.toml` | The spoken script narration reads, built by code from each chapter, and the shared rules it reads with: templates, common terms, symbols and numbers as words (see Narration) |
 | `data/drafting.toml` | The model bar: the models books may be drafted with. Open models are for recorded outputs only (W-48) |
 | `prompts/` | The agents' prompts, published so anyone can read what an agent was told |
@@ -67,6 +68,8 @@ re-check concepts --book path/to/book  # concepts.toml: each definition quoted f
                                        # fixed types; lists a term used before its definition with no link (--strict fails);
                                        # --previous latest: every address the latest edition released still answers
 re-check narration --book path/to/book # terms no rule reads, and examples, blocks and tables with no description (warns)
+re-check figures --book path/to/book --write   # the shared style figures are drawn with, examples/lib/figures.py;
+                                       # without --write, every figure's format and writing (see Figures)
 re-check kit --book path/to/book --write --chapter first-id --chapter second-id   # the kit a new draft starts
                                        # with: .gitignore, examples/lib (threads and seeds), recordings/recorded.py
                                        # (record into scratch, then copy in), numbered chapter stubs and each
@@ -234,6 +237,24 @@ Everything a terminal book teaches can be worked through free, on your own machi
 
 You run each step yourself, copied from the page. A chapter's setup never names a step that runs in the background, since a chapter's start is what steps leave once they've ended.
 
+## Figures
+
+A figure is an example's output. An example draws it from the book's own data with the shared style, and `save(fig, "lead-client-fortnight")` writes `examples/figures/lead-client-fortnight.svg` and prints `figure: figures/lead-client-fortnight.svg`, which its recorded output keeps. A chapter embeds it beside that example, and points to it with a binding the build numbers:
+
+```markdown
+{{fig:lead-client-fortnight}} draws the lead client's last two weeks before the first standard cutoff.
+
+![The load repeats a daily rise and fall, and its 24-hour mean moves more slowly](../examples/figures/lead-client-fortnight.svg "The lead client's load and its 24-hour mean")
+
+[Example: figure-lead-client-fortnight](../examples/figure-lead-client-fortnight.py)
+```
+
+- **Numbered by the build:** `{{fig:NAME}}` is "Figure 4.1", the chapter's number, then the figure's order in the chapter; it works across chapters, and a name no chapter embeds is a binding problem, as an `{{out:…}}` is. A figure's name is unique in its book. No figure number is typed: `re-check style` refuses "Figure 4.1" in prose and in a figure example.
+- **The shared style** (`re-check figures --write`, from `data/figures.toml`): matplotlib's SVG backend, a fixed hash salt, text kept as text and no metadata date, so the same data gives the same bytes under any hash seed; its text laid out with the fonts matplotlib ships alone, never a machine's own; the brand's colours (ACCENT for the series the prose names, INK, MUTED and RULE, each a design token's light value), and IBM Plex Sans named first. A book's copy that differs fails the section-ID check, as a figure without the style does: book examples run in their own pinned runtime, where these standards aren't installed.
+- **Checked as output:** each example runs in a scratch copy of `examples/` with `figures/` emptied, so what's there after it ran is what it drew. Each SVG it drew is compared with the committed one as a tree: the same elements, attribute names and text, IDs read in the order they appear, and each number in an attribute within `[compare] tolerance` (0.05 user units), since numpy's SIMD paths can round the last bit differently on Intel and AMD. A figure the book doesn't have yet fails until it's recorded; `--record` writes each figure with the output, and removes one the example no longer draws. The run's report lists each figure with its file, its hash and whether it passed, and a change to a figure's file runs the examples that draw it (`--affected`). Under `--seeds`, a figure must be the same bytes under each seed.
+- **The format** (`re-check section-ids`, `re-check figures`): each figure's file is under `examples/figures/`, at most `[format] max_bytes`, drawn by an example its chapter embeds and embedded once; it holds no script, event handler, foreignObject, entity or reference outside itself; and no chapter shows an image no example draws.
+- **The writing** (`re-check style`, `re-check figures`): alt text that states the figure's point rather than its name (W-39); a caption, a binding in the prose that points to it, no typed number and only the palette's colours (W-82).
+
 ## Narration
 
 Narration reads a book's text word for word, and never its code, output or tables. `re_standards/spoken.py` builds each chapter's spoken script by code, never by a model, from the parsed chapter with every binding filled in: one line per recorded paragraph, list item, heading or element, each with its kind and the section it belongs to.
@@ -241,6 +262,7 @@ Narration reads a book's text word for word, and never its code, output or table
 - Inline code is read through the lexicon, or by its parts: `lib.store.product_text` is "lib dot store dot product text".
 - Numbers, years, decimals, signs, symbols and edition codes are read as words: 0.615 is "zero point six one five", (Chen et al., 2022) is "twenty twenty-two", 2026.10.6 is "twenty twenty-six point ten point six". A number a binding fills in is a count, never a year.
 - Each example, fenced block and table is read as the description the book writes for it, or announced where it has none ("Example: inverted index by hand. Its code and output are on the page.").
+- A figure is read by its number and caption alone, never its alt text: "Figure four point one. The lead client's load and its twenty-four-hour mean." A `{{fig:…}}` in the prose is read as the figure's number.
 - A chapter opens with its number and title, the book's title and the disclosure, and ends with its number. It never names the edition, so a chapter whose words didn't change keeps its recording from edition to edition. The whole-book file opens and closes with credits, which name the edition.
 
 Every word is the edition's text or a template in `data/narration.toml`, whose `rules_version` a recorded paragraph's key includes, so a change to how the rules read means recording again.

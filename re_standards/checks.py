@@ -23,8 +23,10 @@ from .tape import KIND_LABELS
 
 def check_section_ids(head: Book, base: Book | None = None, previous: dict | None = None) -> list[str]:
     """Every chapter, section and example has a valid, unique ID, and no ID that existed on the base
-    branch or in the previous edition has disappeared without an entry in redirects.yml."""
-    problems = list(head.problems)
+    branch or in the previous edition has disappeared without an entry in redirects.yml. Every figure, too, is drawn by
+    an example its chapter embeds, safe to show and embedded once (figures.problems)."""
+    from . import figures
+    problems = list(head.problems) + figures.problems(head)
     live, retired = set(head.ids()), set(head.redirects)
     gone: dict[str, str] = {}
     if base is not None:

@@ -20,6 +20,9 @@ example = "Example: {name}. {description}"
 step = "Step: {name}. {description}"
 check = "Check your work: {name}. {description}"
 file = "File: {name}. {description}"
+# A figure, read by its number and caption alone, never its alt text: the prose around it says what to see in it
+# (W-54). The number reads as words: "Figure four point one."
+figure = "Figure {number}. {caption}"
 ordered_item = "{number}. {text}"        # an item of a numbered list; a bulleted one is read as it is
 quote = "{text}"
 link_url = "a link on the page"          # a link whose text is its address

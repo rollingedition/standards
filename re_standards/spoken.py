@@ -30,10 +30,11 @@ from pathlib import Path
 from markdown_it.token import Token
 
 from . import data_path, style
-from .bookfmt import BINDING, SECTION_LEVELS, Book, Chapter, _embed_id, _step_ref, _strip_heading_id, new_markdown
+from .bookfmt import (BINDING, SECTION_LEVELS, Book, Chapter, _embed_id, _step_ref, _strip_heading_id, figure_name,
+                      new_markdown)
 
 KINDS = ("opening", "heading", "prose", "item", "working-rule", "quote", "example", "block", "table", "ending", "credits",
-         "step", "check", "file")
+         "step", "check", "file", "figure")
 
 # Private-use characters mark spans while a Line is built, and never reach its text: a value a binding filled in
 # (a count, never a year); a lexicon's reading of inline code (never read through the lexicon again); a number that
@@ -378,6 +379,14 @@ class Speaker:
             return f"{num['months'][names[m.group(1)[:3].lower()] - 1]} {ordinal(day)}" if 1 <= day <= 31 else m.group(0)
         text = re.sub(rf"\b{month} (\d{{1,2}})(?![\w.:]\d|\d|\w)", day_only, text)
 
+        def clock(m):                                    # 18:00 "eighteen hundred", 05:00 "oh five hundred", 14:32
+            hour, minute = int(m.group(1)), int(m.group(2))
+            said = f"{num.get('oh', 'oh')} {cardinal(hour)}" if m.group(1).startswith("0") else cardinal(hour)
+            if minute == 0:
+                return f"{said} {num.get('hundred', 'hundred')}"
+            return f"{said} {num.get('oh', 'oh')} {ONES[minute]}" if minute < 10 else f"{said} {_under_100(minute)}"
+        text = re.sub(r"(?<![\w:.])([01]\d|2[0-3]):([0-5]\d)(?![\w:]|[.,]\d)", clock, text)
+
         # a plus between words, as in a version's 2.11.0+cpu; scientific notation, 3.00e-03
         text = re.sub(r"(?<=\w)\+(?=[A-Za-z])", f" {self.spaced.get('+', 'plus')} ", text)
         def scientific(m):
@@ -656,6 +665,18 @@ class _ChapterScript:
             text = _fill(templates[kind], name=name, description=self.described(kind, say, f"[examples.{sid}]"))
         self.add(kind, text, self.where(tok))
 
+    def figure(self, name: str, caption: str, tok: Token) -> None:
+        """A figure: its number and its caption, by the template, never its alt text or its address. The prose beside it
+        says what to see in it (W-54), so a listener follows what a reader sees."""
+        fig = self.book.figures.get(name)
+        if fig is None:
+            return
+        caption = caption.strip()
+        if caption and MARKS.sub("", caption)[-1:] not in (".", "?", "!"):
+            caption += "."
+        self.add("figure", _fill(self.speaker.templates["figure"], number=fig.number, caption=caption).strip(),
+                 self.where(tok))
+
     def block(self, tok: Token) -> None:
         lang = (tok.info or "").strip().split(" ")[0] if tok.type == "fence" else ""
         first_line = tok.map[0] + (1 if tok.type == "fence" else 0)
@@ -714,6 +735,12 @@ class _ChapterScript:
                 if ref is not None:
                     self.flush_item()
                     self.step(ref[0], ref[1], tok)
+                    i += 3
+                    continue
+                fig = figure_name(tokens, i)
+                if fig is not None:
+                    self.flush_item()
+                    self.figure(fig[0], fig[2], tok)
                     i += 3
                     continue
                 inline = tokens[i + 1]

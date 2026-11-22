@@ -10,7 +10,8 @@
 [files]
 deps = ["examples/requirements.txt", "examples/requirements.in", "examples/.python-version"]
 prose = ["chapters/*.md"]
-code = ["examples/*.py", "examples/*.out", "examples/data/*", "recordings/*", "prep/*"]
+# A figure an example draws (W-82) is its output, as its .out is: a change that redraws one is a change to code.
+code = ["examples/*.py", "examples/*.out", "examples/figures/*.svg", "examples/data/*", "recordings/*", "prep/*"]
 # The spoken descriptions and lexicon narration reads, beside the chapters. They're never on the page, so a change to
 # them alone has no kind of change: it needs no kind label, cuts no edition of its own, and rides with the next one.
 narration = ["narration/*.toml"]

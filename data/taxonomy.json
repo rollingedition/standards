@@ -91,7 +91,8 @@
     "llm-evaluation",
     "natural-language-processing",
     "fine-tuning",
-    "llm-security"
+    "llm-security",
+    "llm-observability"
    ],
    "description": "How language models work and how to build with them."
   },
@@ -125,7 +126,8 @@
     "semantic-search",
     "vector-databases",
     "llm-evaluation",
-    "llm-security"
+    "llm-security",
+    "llm-observability"
    ],
    "description": "Grounding a model's answers in retrieved documents."
   },
@@ -140,7 +142,8 @@
    "related": [
     "prompt-engineering",
     "llm-evaluation",
-    "llm-security"
+    "llm-security",
+    "llm-observability"
    ],
    "description": "Systems where a model plans and uses tools to reach a goal."
   },
@@ -161,7 +164,8 @@
     "model-evaluation",
     "experimentation",
     "model-monitoring",
-    "llm-security"
+    "llm-security",
+    "llm-observability"
    ],
    "description": "Test sets, graders, regression suites and monitoring for LLM applications."
   },
@@ -259,7 +263,8 @@
    "related": [
     "model-evaluation",
     "data-quality",
-    "llm-evaluation"
+    "llm-evaluation",
+    "llm-observability"
    ],
    "description": "Watching models in production for drift, errors and regressions."
   },
@@ -507,9 +512,29 @@
     "prompt-engineering",
     "retrieval-augmented-generation",
     "large-language-models",
-    "data-governance"
+    "data-governance",
+    "llm-observability"
    ],
    "description": "Attacking and defending applications and agents built on language models: prompt injection, data exfiltration, tool misuse, and defences you can measure."
+  },
+  {
+   "id": "llm-observability",
+   "label": "LLM observability",
+   "areas": [
+    "mlops",
+    "artificial-intelligence"
+   ],
+   "wikipedia": "Observability_(software)",
+   "wikidata": "Q115800581",
+   "related": [
+    "model-monitoring",
+    "llm-evaluation",
+    "large-language-models",
+    "ai-agents",
+    "retrieval-augmented-generation",
+    "llm-security"
+   ],
+   "description": "Tracing LLM applications and agents with open standards, and answering from the traces where the time and money go, which step failed and what changed."
   }
  ]
 }

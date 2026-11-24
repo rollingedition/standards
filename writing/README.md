@@ -16,7 +16,7 @@ Lint checks run with `re-check style --book PATH`. Those marked "when built" are
 
 | Exemplar | What it shows |
 | --- | --- |
-| `explain-then-case.md` | The house pattern: explain, make it concrete, close with the working rule (W-8) |
+| `explain-then-case.md` | The house pattern, one good order for a section: explain, make it concrete, close with a working rule (W-8) |
 | `chapter-opening.md` | A chapter's opening: the promise, the problem in the case, then the plan (W-2, W-64, W-65) |
 | `results-paragraph.md` | Results that lead with the point, and a yes or no that's asserted (W-61) |
 | `sourced-paragraph.md` | Sources cited in passing, as a textbook does (W-62) |
@@ -38,8 +38,8 @@ Either way, don't explain what a DataFrame is in a book about search.
 **W-2 State the promise.** A book's first page names its reader, its prerequisites and what the reader will be able to build. Each chapter opens with one or two sentences on what the reader can do by its end.
 *Why:* readers, and agents choosing sections, decide in seconds whether this is the right text. *Check:* critic.
 
-**W-3 One capability per chapter, one idea per section.** If a section heading needs "and", split the section.
-*Why:* small units are easier to learn, review, cite and update. *Check:* critic.
+**W-3 One capability per chapter, one question per section.** Give each section one question the reader needs answered. Keep two ideas together when their relationship is the point, as in a comparison, and split a section when it starts a separate question. A heading that needs "and" is a reason to look again, not a reason to split.
+*Why:* small units are easier to learn, review, cite and update, but a comparison cut in two loses what it compares. *Check:* critic.
 
 **W-60 A summary in the catalog's shape.** The summary in `book.toml` is one sentence in three parts: what the book teaches, in the reader's words; after a colon, the main things it covers, in the book's order; and what it works on, its case, data or tools. Aim for about 40 words, as the other books' summaries run, so the catalog reads evenly; there's no fixed limit. Write "How search engines find and rank results, and how to measure whether a change helps: lexical, semantic and hybrid retrieval, reranking with learned models and LLMs, and judgments from people and LLMs, on a real product catalog." Not a tagline, such as "Forecasts you can trust", and not every chapter in turn.
 *Why:* the catalog, the book's page, search results and the book's repository show it beside the other books'. *Check:* `re-check manifest` notes a summary far from the usual length (`[summary]` in `data/writing.toml`) and never fails for it; critic for the rest.
@@ -63,24 +63,25 @@ Either way, don't explain what a DataFrame is in a book about search.
 A chapter may skip a part. It never adds others: no history lessons, no "fun facts", no previews of later chapters beyond one sentence.
 *Why:* a predictable shape lets readers skim and lets agents check completeness. *Check:* critic.
 
-**W-7 Length.** A chapter runs 3,000 to 6,000 words of prose, and a `##` section, with its subsections, 200 to 900. A book has 5 to 12 chapters.
-*Why:* short enough to verify, long enough to teach. *Check:* lint (`re-check style`).
+**W-7 Length.** A chapter usually runs 3,000 to 6,000 words of prose, and a `##` section, with its subsections, 200 to 900. The ranges are for planning and review. Read a chapter or section outside them again for missing reasoning, repetition or a scope that wants splitting, and keep it when its treatment is complete and in proportion to what the reader needs. Never pad a short, complete explanation to reach the floor, or split a coherent comparison to stay under the ceiling. A book has 5 to 12 chapters.
+*Why:* short enough to verify, long enough to teach; but length is a sign to look at, not the fault itself. *Check:* lint (`re-check style`): the word ranges print as "to read again" and pass, and the chapter count fails.
 
 ## 3. Explaining, then making it concrete
 
-**W-8 Explain, then make it concrete.** This is the house pattern for every section:
+**W-8 Explain, then make it concrete.** A section sets out its question, brings the explanation and the example, and says what follows from them, in the order that makes its reasoning easiest to follow. The house pattern is one good order:
 
 1. **Explain** the idea in general terms, in a paragraph or two: what it is, and why it matters.
 2. **Make it concrete** with the running case: what is at stake in the case, the example, its output, and what that output means for the case.
-3. **Close with the working rule** (W-10).
+3. **Close with a working rule** where the evidence supports a decision the reader will make (W-10).
 
-*Why:* the explanation gives the reader something to hang the case on, and the case makes the idea stick. *Check:* critic.
+A section may instead start from the problem as the case shows it (W-65), from a result that surprises, or from a worked derivation. Don't repeat an order only because the last section used it. Every section gives the reader something they need; none needs every part.
+*Why:* the explanation gives the reader something to hang the case on, and the case makes the idea stick. One order, repeated in every section, makes a book read like a form. *Check:* critic.
 
 **W-9 Show the failure.** When the obvious approach fails, run it and show the real failure before the fix: the error, the wrong number or the slow timing.
 *Why:* a visible failure is what makes a fix worth reading, and readers will meet it in their own work. *Check:* critic.
 
-**W-10 End with the working rule.** A section ends with its working rule: a paragraph that opens with **Working rule:** and then says, in full sentences, what to do, when, and when to do something else. A `###` subsection may close with a rule of its own. A section that ends in a list or a table, such as a chapter's summary, needs none.
-*Why:* readers act on rules, and reviewers can check them. It's a working rule because it holds until your own measurements say otherwise. The sites show it as a quiet panel with the label on a line of its own, so a reader skimming a chapter can find it, and the rule's first word takes a capital. *Check:* lint for the label and its place (`re-check style`; the label is in `data/writing.toml`); critic for the rule itself.
+**W-10 A working rule where it helps.** A section ends when its reasoning is complete. Close it with a working rule when the evidence supports a decision the reader is likely to make: a paragraph that opens with **Working rule:** and then says, in full sentences, what to do, when, and when to do something else. Leave it out when it would only repeat what the paragraph before it made clear. A `###` subsection may close with a rule of its own. A rule closes its section, never the middle of one.
+*Why:* readers act on rules, and reviewers can check them. It's a working rule because it holds until your own measurements say otherwise. The sites show it as a quiet panel with the label on a line of its own, so a reader skimming a chapter can find it, and the rule's first word takes a capital. A rule at the end of every section becomes a refrain the reader learns to skip. *Check:* lint for the label and its place where a rule is used (`re-check style`; the label is in `data/writing.toml`); critic for whether a section wants one, and for the rule itself.
 
 **W-11 Predict, then run, at most once per chapter.** At a chapter's turning point, ask the reader to predict an output before the example that shows it, in words of the chapter's own (W-63). Foundations books do this in most chapters; In practice books rarely.
 *Why:* predicting before seeing makes the key idea stick, but asked often it turns into a quiz. *Check:* critic.

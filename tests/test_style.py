@@ -111,9 +111,20 @@ def test_lengths_long_examples_and_chapter_count(tmp_path):
     long_example = ("\n".join(f"x{i} = {i}" for i in range(45)) + '\nprint("unreadable amounts:", 1)\n', "unreadable amounts: 1\n")
     book = book_with(tmp_path, examples={"count": long_example})
     problems = lint(book, chapter_words=[3000, 6000], section_words=[200, 900], book_chapters=[5, 12])
-    assert any("W-7: a chapter runs" in p for p in problems)
+    assert not any("words of prose" in p or "for a section" in p for p in problems)   # lengths are warnings
     assert any("W-18" in p for p in problems)
     assert any("W-7: a book has 5 to 12 chapters" in p for p in problems)   # the test book is live with 1 chapter
+
+
+def test_lengths_outside_the_ranges_are_to_read_again(tmp_path):
+    """W-7's word ranges are for planning: a chapter or section outside them is a warning, never a failure."""
+    book = book_with(tmp_path)
+    cfg = style.load_config()
+    cfg["length"] = {**cfg["length"], "chapter_words": [3000, 6000], "section_words": [200, 900]}
+    warned = [p for p in style.check_warnings(book, cfg) if style.rule_of(p) == "W-7"]
+    assert any("words of prose, outside the usual 3,000 to 6,000" in p for p in warned)
+    assert all(p.endswith("(a warning: read it again)") for p in warned)
+    assert not any(style.rule_of(p) == "W-7" and "words" in p for p in style.check_style(book, cfg))
 
 
 def test_recorded_outputs_need_a_complete_manifest(tmp_path):
@@ -190,19 +201,19 @@ def w10(tmp_path, chapter):
     return [p for p in lint(book_with(tmp_path, chapter=chapter)) if "W-10" in p]
 
 
-def test_a_section_closes_with_one_working_rule_under_its_label(tmp_path):
-    """W-10: the label comes from config, so a retired one is named, and a rule that isn't last, a second rule or a
-    section that ends in a plain paragraph is out of place."""
+def test_a_working_rule_when_used_closes_its_section_under_its_label(tmp_path):
+    """W-10: a section needs no working rule, but one that's used takes the label from config, so a retired
+    one is named, and a rule that isn't last, or a second rule, is out of place."""
     assert w10(tmp_path / "ok", CHAPTER) == []
     retired = w10(tmp_path / "old", CHAPTER.replace("**Working rule:**", "**What to do:**"))
     assert len(retired) == 1 and '"**Working rule:**", not "**What to do:**"' in retired[0] and ":17:" in retired[0]
     missing = w10(tmp_path / "missing", CHAPTER.replace("**Working rule:** Coerce", "Coerce"))
     lower = w10(tmp_path / "lower", CHAPTER.replace("**Working rule:** Coerce", "**Working rule:** coerce"))
     assert len(lower) == 1 and "start the working rule with a capital" in lower[0]
-    assert len(missing) == 1 and "close the section with its working rule" in missing[0]
+    assert missing == []                                   # a section may end when its reasoning is complete
     early = w10(tmp_path / "early", CHAPTER.replace("**Working rule:** Coerce, count, then decide.\n",
                                                     "**Working rule:** Coerce, count, then decide.\n\nOne more thing.\n"))
-    assert any("move what follows it above it" in p for p in early) and any("close the section" in p for p in early)
+    assert len(early) == 1 and "move what follows it above it" in early[0]
     twice = w10(tmp_path / "twice", CHAPTER.replace("\n[Example: count]", "\n**Working rule:** Count first.\n\n[Example: count]"))
     assert len(twice) == 1 and "move what follows it above it" in twice[0]
 
@@ -235,9 +246,9 @@ def test_a_book_may_skip_rules_it_does_not_keep(tmp_path, capsys):
     from re_standards import cli
     chapter = CHAPTER.replace(LONG + "\n\n[Example", "Short, and simply put.\n\n[Example")
     book = book_with(tmp_path, chapter=chapter)
-    everything = style.check_style(book)
-    assert any("W-7: a chapter runs" in p for p in everything) and any("W-35" in p for p in everything)
-    kept = style.check_style(book, skip={"W-7"})
+    everything = style.check_style(book) + style.check_warnings(book)
+    assert any("words of prose, outside" in p for p in everything) and any("W-35" in p for p in everything)
+    kept = style.check_style(book, skip={"W-7"}) + style.check_warnings(book, skip={"W-7"})
     assert kept and not any(style.rule_of(p) == "W-7" for p in kept) and any("W-35" in p for p in kept)
     assert style.rule_of("W-26: chapters/01.md:3: unresolved") == "W-26"
     assert cli.main(["style", "--book", str(book.root), "--skip", "W-7"]) == 1        # W-35 still fails
@@ -257,16 +268,16 @@ def test_a_book_may_keep_its_own_length_limits(tmp_path, capsys):
     book = book_with(tmp_path, chapter=CHAPTER.replace(LONG, words(300), 1).replace(LONG, words(1000), 1))
     cfg, wrong = style.with_limits(style.load_config(), ["chapter_words=1500,6000"])
     assert not wrong and cfg["length"]["chapter_words"] == [1500, 6000] and cfg["length"]["section_words"] == [200, 900]
-    problems = style.check_style(book, cfg)
-    assert any("W-7: a chapter runs 1,500 to 6,000 words" in p for p in problems)      # 1,300-odd words: still short
-    assert any("W-7: a section runs 200 to 900 words" in p for p in problems)           # the section limit stays
+    warned = style.check_warnings(book, cfg)
+    assert any("outside the usual 1,500 to 6,000" in p for p in warned)                 # 1,300-odd words: still short
+    assert any("outside the usual 200 to 900 for a section" in p for p in warned)       # the section range stays
     longer = book_with(tmp_path / "b", chapter=CHAPTER.replace(LONG, words(700), 1).replace(LONG, words(800), 1))
-    kept = style.check_style(longer, cfg)
-    assert not any("a chapter runs" in p for p in kept)                                 # 1,500-odd words now pass
-    assert any("a chapter runs 3,000 to 6,000" in p for p in style.check_style(longer))  # and fail the standards' own
+    kept = style.check_warnings(longer, cfg)
+    assert not any("words of prose" in p for p in kept)                                 # 1,500-odd words now fit
+    assert any("outside the usual 3,000 to 6,000" in p for p in style.check_warnings(longer))  # the standards' own
     assert cli.main(["style", "--book", str(longer.root), "--limit", "chapter_words=1500,6000"]) == 1
     out = capsys.readouterr()
-    assert "a chapter runs" not in out.err and "W-7: a book has 5 to 12 chapters" in out.err   # the rest of W-7 stays
+    assert "words of prose" not in out.err and "W-7: a book has 5 to 12 chapters" in out.err   # the chapter count fails
     for bad in ("chapter_words=1500", "pages=1,2", "chapter_words=6000,1500", "example_lines=1,2", "chapter words"):
         assert cli.main(["style", "--book", str(longer.root), "--limit", bad]) == 1
         assert "--limit" in capsys.readouterr().err

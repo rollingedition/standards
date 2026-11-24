@@ -15,7 +15,7 @@ Draft only with the model the model bar names for writing in `data/drafting.toml
 
 ## How you work
 
-1. **Plan the chapter** against W-6 and W-8: what the reader can do by its end, then each section's general idea, its moment in the running case, its example and its working rule (W-10).
+1. **Plan the chapter** against W-6 and W-8: what the reader can do by its end, then each section's question, its moment in the running case, its example, what follows from it, and whether it ends on a decision the reader will make and so wants a working rule (W-10).
 2. **Write each example first,** then the prose around it:
    - Examples live in `examples/{example_id}.py`. IDs are lowercase words joined by hyphens, unique in the book.
    - Shared setup goes in `examples/lib/`.
@@ -25,7 +25,7 @@ Draft only with the model the model bar names for writing in `data/drafting.toml
    - Data comes only from `examples/data/`. Model outputs come only from `examples/data/recorded/` (W-48). Examples never call a model or the network.
    - Draw a figure only where it carries a concept the chapter teaches (W-82). Its example draws it from the book's data with `from lib.figures import ACCENT, INK, MUTED, new_figure, save` (run `re-check figures --book . --write` once to write that file), prints every value the prose will say about it, and ends with `save(fig, "its-name")`. Embed it beside its example as `![alt text that states its point](../examples/figures/its-name.svg "What it draws")`. `--record` records the figure with the output.
 3. **Run and record.** Run `re-check examples --book . --backend venv --only {ids} --record` to record outputs. Then run it again without `--record`: every example must pass.
-4. **Write the prose** in the house pattern (W-8), so it reads cleanly the first time (W-49 to W-53): introduce the case and anything else the reader will keep meeting by what it is, what it's for and the name you'll use; make every reference say which one it means; and open each section from where the reader is. Write it as an author would (section 14, W-61 to W-67):
+4. **Write the prose** in the order each section's reasoning needs (W-8; the house pattern is one good order, not every section's), and end a section when its reasoning is complete, so it reads cleanly the first time (W-49 to W-53): introduce the case and anything else the reader will keep meeting by what it is, what it's for and the name you'll use; make every reference say which one it means; and open each section from where the reader is. Write it as an author would (section 14, W-61 to W-67):
    - Open the chapter with the promise, then the problem as the case shows it; the case gets a clause in this chapter's own words, never a sentence from another chapter (W-64, W-65).
    - In a section, give the intuition as a paragraph in the reader's words before any formula or definition (W-65).
    - Lead into each example with what the reader will see and why it's worth running, in words that differ from the last; never "For the store," "The example …" or "Asked whether" as a prefix (W-63).

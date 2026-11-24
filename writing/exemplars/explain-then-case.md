@@ -1,6 +1,6 @@
 # Exemplar: explain, then make it concrete
 
-One section written to the house pattern (W-8), followed by notes on the rules it shows.
+One section written to the house pattern (W-8), one good order among several, followed by notes on the rules it shows.
 
 In a book, the code and the output blocks come from example files and their recorded outputs. The numbers in the prose are bindings to those outputs (W-26), so they change when the outputs do. Its running case is the orders table from the pipeline demo, run with pandas 2.2.2.
 
@@ -45,7 +45,7 @@ Of 10 orders, 1 has no usable amount. That's few enough to drop and mention in t
 | W-9 Show the failure | The strict conversion runs, and its real error appears before the fix. |
 | W-21 Print what the prose discusses | The example prints the one count the text uses. |
 | W-26 Bind numbers from outputs | In the source, the sentence reads "Of {{out:load-orders:rows}} orders, {{out:fix-types:unreadable amounts}} has no usable amount." The build fills both in from labelled output lines, so `load-orders` prints a `rows: 10` line. "A third" is judgement, not output. |
-| W-10 End with the working rule | "Working rule" closes the section, including when to choose differently. |
+| W-10 A working rule where it helps | The section ends on a decision the reader will make, so a working rule closes it, including when to choose differently. |
 | W-13 Take positions | "Coerce, count, then decide" is a recommendation with a stated exception. |
 | W-40 Sections stand alone | The section names its case ("the orders export", "the `amount` column") instead of pointing back to an earlier section. |
 | W-41 Headings say what the section does | "Coerce bad values, then count them". |

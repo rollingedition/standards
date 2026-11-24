@@ -96,10 +96,10 @@ def _section_parts(body: str, offset: int) -> list[tuple[int, list[tuple[str, in
 
 
 def _working_rules(file: str, body: str, offset: int, rule: dict) -> list[str]:
-    """W-10, its mechanical half. A ## section, with its ### subsections, closes with a working rule labelled as
-    config says, unless it ends in a list or table, as a chapter's summary does. A ### subsection, or the text
-    before it, may close with a rule of its own; a rule anywhere else is out of place. Whether a rule is a good
-    one is the critic's to judge."""
+    """W-10, its mechanical half. A section needs no working rule: it ends when its reasoning is complete.
+    Where one is used, it carries the label config gives, starts with a capital and closes its ## section or ###
+    subsection, or the text before one; a rule anywhere else is out of place. Whether a section wants a rule, and
+    whether it's a good one, is the critic's to judge."""
     label, retired = rule["label"], set(rule.get("retired", []))
     problems: list[str] = []
 
@@ -107,11 +107,7 @@ def _working_rules(file: str, body: str, offset: int, rule: dict) -> list[str]:
         lead = LEAD.match(block[2]) if block[0] == "paragraph" else None
         return lead is not None and (lead.group(1) == label or lead.group(1) in retired)
 
-    sections: list[list[tuple[str, int, str]]] = []
-    for level, blocks in _section_parts(body, offset):
-        if level == 2 or not sections:
-            sections.append([])
-        sections[-1] += blocks
+    for _level, blocks in _section_parts(body, offset):
         rules = [b for b in blocks if is_rule(b)]
         for b in rules:
             lead = LEAD.match(b[2])
@@ -124,10 +120,6 @@ def _working_rules(file: str, body: str, offset: int, rule: dict) -> list[str]:
         for b in (b for b in rules if b is not closing):
             problems.append(f"{file}:{b[1]}: W-10: a working rule closes its section; move what follows it above it, "
                             "or make it a rule of its own section")
-    for blocks in sections:
-        if blocks and blocks[-1][0] == "paragraph" and not is_rule(blocks[-1]):
-            problems.append(f"{file}:{blocks[-1][1]}: W-10: close the section with its working rule, "
-                            f"a paragraph that opens with \"**{label}:**\"")
     return problems
 
 
@@ -190,8 +182,33 @@ def check_style(book: Book, cfg: dict | None = None, skip: set[str] | frozenset[
 def check_warnings(book: Book, cfg: dict | None = None, skip: set[str] | frozenset[str] = frozenset()) -> list[str]:
     """What the lint asks a writer to read again, which never fails the check: a paragraph of many bound numbers,
     quotations and links (W-61, W-62), an index with an unexplained offset (W-68). Rules in `skip` are left out."""
-    found = narrative.warnings(book, cfg or load_config())
+    cfg = cfg or load_config()
+    found = length_warnings(book, cfg) + narrative.warnings(book, cfg)
     return [p for p in found if rule_of(p) not in skip] if skip else found
+
+
+def length_warnings(book: Book, cfg: dict) -> list[str]:
+    """W-7's word ranges, for planning and review: a chapter or a ## section outside them is one to read again
+    for missing reasoning, repetition or a scope that wants splitting, never a failure. The chapter count still fails."""
+    lengths, found = cfg["length"], []
+    for c in book.chapters:
+        prose = _prose_lines(c.body, c.body_offset)
+        total = sum(_words(t) for _, t in prose)
+        lo, hi = lengths["chapter_words"]
+        if not lo <= total <= hi:
+            found.append(f"{c.file}: W-7: {total:,} words of prose, outside the usual {lo:,} to {hi:,}; check it for "
+                         "missing reasoning, repetition or a scope that wants splitting" + narrative.NOTE)
+        lo, hi = lengths["section_words"]          # each ## heading and everything under it until the next one
+        current, count, start = None, 0, 0
+        for n, text in prose + [(None, "## end")]:
+            if text.startswith("## "):
+                if current is not None and not lo <= count <= hi:
+                    found.append(f"{c.file}:{start}: W-7: \"{current}\" has {count} words, outside the usual {lo} to "
+                                 f"{hi} for a section" + narrative.NOTE)
+                current, count, start = HEADING_ID.sub("", text[3:]).strip(), 0, n
+            elif current is not None:
+                count += _words(text)
+    return found
 
 
 def _check_style(book: Book, cfg: dict | None = None) -> list[str]:
@@ -218,22 +235,7 @@ def _check_style(book: Book, cfg: dict | None = None) -> list[str]:
                 if rx.search(c.title):
                     problems.append(f"{c.file}: W-4: a chapter's title names what it builds, in the book's own terms; "
                                     f"\"{term}\" could open any book (\"{c.title}\")")
-        prose = _prose_lines(c.body, c.body_offset)
-        total = sum(_words(t) for _, t in prose)
-        lo, hi = lengths["chapter_words"]
-        if not lo <= total <= hi:
-            problems.append(f"{c.file}: W-7: a chapter runs {lo:,} to {hi:,} words of prose; this one has {total:,}")
-
-        # sections: each ## heading and everything under it until the next ## heading
-        lo, hi = lengths["section_words"]
-        current, count, start = None, 0, 0
-        for n, text in prose + [(None, "## end")]:
-            if text.startswith("## "):
-                if current is not None and not lo <= count <= hi:
-                    problems.append(f"{c.file}:{start}: W-7: a section runs {lo} to {hi} words; \"{current}\" has {count}")
-                current, count, start = HEADING_ID.sub("", text[3:]).strip(), 0, n
-            elif current is not None:
-                count += _words(text)
+        prose = _prose_lines(c.body, c.body_offset)       # its word ranges are warnings (length_warnings)
 
         for n, text in prose:
             if text.lstrip().startswith("#"):
